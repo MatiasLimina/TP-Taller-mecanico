@@ -134,7 +134,7 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 > Nota: C-05 (security-core, Fase 3) puede arrancar en paralelo apenas cierre C-01.
 
 ### [C-02] `core-repository-uow`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `app/core/repository.py`: `BaseRepository[T]` (sesión + clase del modelo en el constructor; `get_by_id`, `get_all`, `count`, `add`, `update`, `delete`; `add`/`update` hacen `flush()`, nunca `commit()`) y `SoftDeleteRepository[T]` (filtra `borrado_en`; `get_by_id_including_deleted`, `soft_delete`)
   - `app/core/unit_of_work.py`: `UnitOfWork` base (async context manager: commit al salir, rollback ante excepción, no cierra la sesión; una sesión compartida por todos los repos del UoW)
