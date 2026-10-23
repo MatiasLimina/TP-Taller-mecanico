@@ -1,0 +1,141 @@
+{
+  "version": 4,
+  "step": "done",
+  "owner": "active-orchestrator",
+  "discovery": {
+    "skipped": true
+  },
+  "kb": {
+    "created_by": "kb-creator",
+    "source": "ingest",
+    "discovery": {
+      "problem": "API asincrónica para que un taller mecánico gestione clientes, vehículos, órdenes de trabajo con repuestos, stock y acceso por roles (TP integrador Programación III, caps. 1-6)",
+      "system_type": "api",
+      "domain": "taller mecánico (órdenes de trabajo, stock, RBAC)",
+      "scale": "team (inferred, medium confidence)",
+      "stack": "Python 3.12 + FastAPI + SQLModel/SQLAlchemy async + asyncpg + PostgreSQL 16 + Alembic + bcrypt + PyJWT + pydantic-settings",
+      "needs_infra": true
+    },
+    "files": [
+      "knowledge-base/01_vision_y_objetivos.md",
+      "knowledge-base/02_descripcion_general.md",
+      "knowledge-base/03_actores_y_roles.md",
+      "knowledge-base/04_modelo_de_datos.md",
+      "knowledge-base/05_reglas_de_negocio.md",
+      "knowledge-base/06_funcionalidades.md",
+      "knowledge-base/07_flujos_principales.md",
+      "knowledge-base/08_arquitectura_propuesta.md",
+      "knowledge-base/09_decisiones_y_supuestos.md",
+      "knowledge-base/10_preguntas_abiertas.md",
+      "knowledge-base/README.md"
+    ]
+  },
+  "roadmap": {
+    "created_by": "roadmap-generator",
+    "changes_file": "CHANGES.md"
+  },
+  "skills": {
+    "created_by": "find-skill",
+    "recommended": [
+      {
+        "name": "fastapi-templates",
+        "source": "wshobson/agents",
+        "installs": "25.8K",
+        "why": "FastAPI project structure, async patterns, dependency injection",
+        "url": "https://skills.sh/wshobson/agents/fastapi-templates",
+        "install": "npx skills add wshobson/agents@fastapi-templates"
+      },
+      {
+        "name": "fastapi-python",
+        "source": "mindrally/skills",
+        "installs": "13.8K",
+        "why": "FastAPI + async best practices for REST APIs",
+        "url": "https://skills.sh/mindrally/skills/fastapi-python",
+        "install": "npx skills add mindrally/skills@fastapi-python"
+      },
+      {
+        "name": "fastapi",
+        "source": "fastapi/fastapi",
+        "installs": "13.2K",
+        "why": "Official FastAPI skill from the framework authors",
+        "url": "https://skills.sh/fastapi/fastapi/fastapi",
+        "install": "npx skills add fastapi/fastapi@fastapi"
+      },
+      {
+        "name": "fastapi-patterns",
+        "source": "affaan-m/ecc",
+        "installs": "7.2K",
+        "why": "FastAPI patterns incl. async testing",
+        "url": "https://skills.sh/affaan-m/ecc/fastapi-patterns",
+        "install": "npx skills add affaan-m/ecc@fastapi-patterns"
+      },
+      {
+        "name": "auth-implementation-patterns",
+        "source": "wshobson/agents",
+        "installs": "19.3K",
+        "why": "JWT, sessions, RBAC patterns for auth/RBAC domain",
+        "url": "https://skills.sh/wshobson/agents/auth-implementation-patterns",
+        "install": "npx skills add wshobson/agents@auth-implementation-patterns"
+      },
+      {
+        "name": "postgresql-table-design",
+        "source": "wshobson/agents",
+        "installs": "27.7K",
+        "why": "PostgreSQL 16 schema/table design for the data model",
+        "url": "https://skills.sh/wshobson/agents/postgresql-table-design",
+        "install": "npx skills add wshobson/agents@postgresql-table-design"
+      },
+      {
+        "name": "sqlalchemy-alembic-expert-best-practices-code-review",
+        "source": "wispbit-ai/skills",
+        "installs": "2K",
+        "why": "SQLAlchemy + Alembic migration best practices",
+        "url": "https://skills.sh/wispbit-ai/skills/sqlalchemy-alembic-expert-best-practices-code-review",
+        "install": "npx skills add wispbit-ai/skills@sqlalchemy-alembic-expert-best-practices-code-review"
+      },
+      {
+        "name": "sqlalchemy-orm",
+        "source": "bobmatnyc/claude-mpm-skills",
+        "installs": "873",
+        "why": "SQLAlchemy ORM/async session, repository/UoW base",
+        "url": "https://skills.sh/bobmatnyc/claude-mpm-skills/sqlalchemy-orm",
+        "install": "npx skills add bobmatnyc/claude-mpm-skills@sqlalchemy-orm"
+      },
+      {
+        "name": "sqlmodel",
+        "source": "salmanferozkhan/cloud-and-fast-api",
+        "installs": "24",
+        "why": "SQLModel specifics (low installs, treat with caution)",
+        "url": "https://skills.sh/salmanferozkhan/cloud-and-fast-api/sqlmodel",
+        "install": "npx skills add salmanferozkhan/cloud-and-fast-api@sqlmodel"
+      }
+    ],
+    "installed": [
+      "fastapi",
+      "fastapi-templates",
+      "sqlalchemy-alembic-expert-best-practices-code-review"
+    ],
+    "install_scope": "project (.agents/skills, symlinked in .claude/skills; skills-lock.json)"
+  },
+  "registry": {
+    "created_by": "skill-registry",
+    "file": ".atl/skill-registry.md"
+  },
+  "agents": {
+    "created_by": "agent-instruction",
+    "files": [
+      "CLAUDE.md",
+      "AGENTS.md"
+    ],
+    "reglas_applied": [
+      "capas-uow",
+      "async-bcrypt",
+      "sin-lazy-ni-sql-concatenado",
+      "contratos-y-errores",
+      "solo-alembic-sin-secretos",
+      "dinero-y-fechas",
+      "sin-commit-ni-build-sin-pedido",
+      "conventional-commits"
+    ]
+  }
+}
