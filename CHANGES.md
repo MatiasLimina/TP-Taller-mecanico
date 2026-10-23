@@ -109,7 +109,7 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 ## FASE 1 — Fundación del proyecto (Ej.1, 8 %)
 
 ### [C-01] `foundation-setup`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Estructura de directorios obligatoria: `main.py`, `app/core/`, `app/modules/{health,usuarios,clientes,repuestos,ordenes}/`, `migrations/`, `test/`
   - `requirements.txt` (fastapi, uvicorn, sqlmodel, sqlalchemy[asyncio], asyncpg, alembic, bcrypt>=4.0, PyJWT, pydantic-settings), `.gitignore` (excluye `.env`), `env.example` completo sin secretos
