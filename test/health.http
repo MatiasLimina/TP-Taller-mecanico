@@ -1,0 +1,11 @@
+@base = http://localhost:8000
+
+### Sonda de vida: no toca la base
+# Esperado: 200 {"estado":"vivo"} (tambien con PostgreSQL apagado)
+GET {{base}}/health/live
+
+### Sonda de disponibilidad: SELECT 1
+# Esperado con la base arriba: 200 {"estado":"listo"}
+# Esperado con la base caida o credenciales incorrectas: 503
+#   {"estado":"no listo","detalle":"La base de datos no responde"}
+GET {{base}}/health/ready

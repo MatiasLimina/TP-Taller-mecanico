@@ -1,0 +1,23 @@
+# Secretos y entorno (env.example SI se versiona)
+.env
+.env.*
+
+# Entornos virtuales
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editores y logs
+.idea/
+.vscode/
+*.log
+
+# Registro local de skills (no versionado) y duplicado de la consigna
+.atl/
+/TP_Cap1a6_Consigna.pdf

@@ -1,0 +1,8 @@
+fastapi[standard]>=0.111,<1
+sqlmodel>=0.0.24,<0.1
+sqlalchemy[asyncio]>=2.0,<2.1
+asyncpg>=0.30,<1
+alembic>=1.13,<2
+pydantic-settings>=2.0,<3
+bcrypt>=4.0,<6
+PyJWT>=2.8,<3
