@@ -5,6 +5,7 @@ from fastapi import APIRouter, FastAPI
 
 from app.core.config import get_settings
 from app.core.database import create_engine, create_session_factory
+from app.core.security import crear_hash_ficticio
 from app.modules.health.router import router as health_router
 
 
@@ -15,8 +16,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.engine = engine
     app.state.session_factory = create_session_factory(engine)
-    # C-05: app.state.hash_ficticio = await hash_password(...)
     try:
+        app.state.hash_ficticio = await crear_hash_ficticio()
         yield
     finally:
         await engine.dispose()
