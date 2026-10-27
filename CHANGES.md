@@ -215,6 +215,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
   - Usuarios: `admin@`, `admin2@` (ADMIN), `recepcion@`, `mecanico@`, `mecanico2@`, `cliente@`, `nuevo@` (MECANICO con `debe_cambiar_password`), contraseñas de mentira sólo en `seed.py`
   - Clientes: Laura (con usuario, 2 vehículos), Jorge (sin usuario, 1 vehículo); repuestos con movimiento "Stock inicial"; órdenes #1 PENDIENTE y #2 EN_REPARACION (4 bujías con stock 2, a propósito); historial de precio 8000 → 8500; evento de seguridad actor `SISTEMA`
   - Hashes generados con `security.py`
+  - Correos cargados en minúsculas: `seed.py` verifica al cargar y falla (o los normaliza) si alguno tiene mayúsculas o espacios; la API los normaliza y la base no lo impone, porque la consigna admite sólo dos migraciones (S-01 de C-07)
 - **Dependencias**: `C-04, C-05`
 - **Governance**: MEDIO (datos de prueba; credenciales ficticias, nunca reales)
 - **Leer antes**:
@@ -244,6 +245,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
   - `app/core/dependencies.py`: `get_usuario_actual` (401: sin cookie, token inválido/vencido, usuario inexistente/inactivo, `iat` < `password_cambiada_en` comparado sin truncar), control de cambio obligatorio (403 si `debe_cambiar_password`), `requiere_rol(...)` consultando `asignacion_rol` vigente en base por petición (RN04)
   - `main.py`: dos grupos de rutas (abierto: `/auth/*` y salud; protegido: resto con control de cambio montado una vez, RN06)
   - `GET /auth/yo` (usuario, roles vigentes y roles del token); `POST /auth/cambiar-password` (hash antes de la transacción, actualiza `password_cambiada_en`, baja la bandera, emite cookie nueva válida; la anterior da 401). Casos PDF C06-C09
+  - Completar el caso PDF C03: 401 sin cookie y con `Authorization: Bearer` (diferido de C-07, S-06)
 - **Dependencias**: `C-07`
 - **Governance**: CRITICO (autorización 401 vs 403)
 - **Leer antes**:
