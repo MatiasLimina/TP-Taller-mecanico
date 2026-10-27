@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, FastAPI
 
+# Registra los 13 modelos (y resuelve sus relaciones) antes de la primera consulta.
+import app.modules.modelos
 from app.core.config import get_settings
 from app.core.database import create_engine, create_session_factory
 from app.core.errores import registrar_manejadores
