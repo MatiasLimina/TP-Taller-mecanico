@@ -1,4 +1,5 @@
-"""Contratos de entrada y salida del módulo usuarios: registro, login y logout (C-07).
+"""Contratos de entrada y salida del módulo usuarios: registro, login, logout (C-07), perfil
+de sesión y cambio de contraseña (C-08).
 
 Entradas (heredan `EntradaBase`: un campo no declarado da 422):
 
@@ -12,12 +13,23 @@ Entradas (heredan `EntradaBase`: un campo no declarado da 422):
   recorte (S-03). El recorte importa para la unicidad: `uq_cliente_documento` compara el texto
   exacto. Los largos máximos viven sólo acá; no hay validación de formato propio.
 
+- Cambio de contraseña (C-08, S-01): `password_actual` sigue la regla del login (1 carácter a
+  72 bytes, sin mínimo) y `password_nueva` la del registro (8 caracteres a 72 bytes); la nueva
+  debe ser distinta de la actual (422).
+
 Salidas (heredan `SalidaBase`): nunca exponen el hash de la contraseña ni un token.
 """
 
 from typing import Annotated
 
-from pydantic import AfterValidator, BeforeValidator, EmailStr, Field, StringConstraints
+from pydantic import (
+    AfterValidator,
+    BeforeValidator,
+    EmailStr,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 from app.core.schemas import EntradaBase, SalidaBase
 from app.core.security import MAX_BYTES_BCRYPT
@@ -72,6 +84,17 @@ class LoginEntrada(EntradaBase):
     password: PasswordLogin
 
 
+class CambioPasswordEntrada(EntradaBase):
+    password_actual: PasswordLogin
+    password_nueva: PasswordRegistro
+
+    @model_validator(mode="after")
+    def _nueva_distinta_de_la_actual(self) -> "CambioPasswordEntrada":
+        if self.password_nueva == self.password_actual:
+            raise ValueError("La contraseña nueva debe ser distinta de la actual")
+        return self
+
+
 class ClienteRegistradoSalida(SalidaBase):
     id: int
     nombre: str
@@ -94,3 +117,14 @@ class LoginSalida(SalidaBase):
 
 class MensajeSalida(SalidaBase):
     mensaje: str
+
+
+class PerfilSalida(SalidaBase):
+    """`roles_vigentes` sale de la base en esta petición; `roles_token` es lo que dice el token."""
+
+    id: int
+    email: str
+    nombre: str
+    debe_cambiar_password: bool
+    roles_vigentes: list[str]
+    roles_token: list[str]
