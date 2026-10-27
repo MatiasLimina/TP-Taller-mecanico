@@ -30,6 +30,9 @@ Los códigos `RNxx` son los de la consigna (se mantienen tal cual para trazabili
 
 ## Dominio: Integridad
 - **RN15**: `historial_estado_orden`, `movimiento_stock` e `historial_precio_repuesto` son de sólo agregado: nadie modifica ni borra filas. *Garante:* trigger en la base, instalado por migración.
+  - *Alcance:* el trigger rechaza `UPDATE` y `DELETE` desde cualquier rol. El vaciado completo de las tablas (`TRUNCATE`) queda permitido sólo para la puesta en marcha: `seed.py` (C-06) vacía la base antes de cada archivo de pruebas, como pide la consigna. La aplicación nunca vacía ni corrige historiales.
+  - *Decisión:* se consideró separar un rol de migración (dueño) del rol de la aplicación sin permisos sobre estas tablas (sección 6.9), que también impediría desactivar o borrar el trigger. Se eligió no implementarlo (la consigna no lo pide y el TP usa un solo rol) y documentar el límite.
+
 - **RN18**: Ningún error devuelve texto interno de la base; ninguna entrada inválida termina en 500. *Garante:* traducción de `IntegrityError`; validación en el contrato.
 
 ## Reglas globales de contrato (Ejercicio 3)

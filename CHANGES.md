@@ -167,7 +167,7 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
   - `knowledge-base/09_decisiones_y_supuestos.md`
 
 ### [C-04] `append-only-trigger-migration`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Migración 2 escrita a mano: función PL/pgSQL + trigger "sólo agregado" (rechaza UPDATE/DELETE) sobre `historial_estado_orden`, `movimiento_stock`, `historial_precio_repuesto`; comentario de revisión; `downgrade` elimina trigger y función
   - `test/solo_agregado.sql`: seis rechazos (UPDATE y DELETE × 3 tablas) + FK por estado inexistente (caso PDF C14)
