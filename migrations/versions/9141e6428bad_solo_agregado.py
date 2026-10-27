@@ -9,8 +9,14 @@ disparadores. Hace cumplir en la base la regla RN15: `historial_estado_orden`, `
 `historial_precio_repuesto` son de sólo agregado; `UPDATE` y `DELETE` se rechazan, venga de donde venga
 (aplicación, psql, dueño de la tabla). `INSERT` sigue permitido.
 
-`TRUNCATE` no se bloquea a propósito: el disparador es por fila y `seed.py` (C-06) necesita vaciar las
-tablas con `TRUNCATE … RESTART IDENTITY CASCADE`. La aplicación nunca lo ejecuta.
+Alcance: el disparador protege los datos frente a `UPDATE`/`DELETE` de cualquier rol. No protege contra
+la administración del esquema que el dueño de la tabla siempre puede hacer en PostgreSQL:
+- `TRUNCATE` no se bloquea a propósito: el disparador es por fila y `seed.py` (C-06) necesita vaciar las
+  tablas con `TRUNCATE … RESTART IDENTITY CASCADE`, porque la consigna pide que el seed vacíe la base
+  antes de cada archivo de pruebas. La aplicación nunca lo ejecuta.
+- `ALTER TABLE … DISABLE TRIGGER` o `DROP TRIGGER`: el dueño puede quitar la protección. Cerrarlo pide
+  separar un rol de migración (dueño) del rol de la aplicación sin permisos sobre estas tablas
+  (sección 6.9 de la consigna); no se pide porque el TP usa un solo rol de base.
 
 El rechazo usa SQLSTATE `P0001` (no clase 22 ni 23) para que la API lo responda 500 y no lo disfrace
 de error del cliente. El mensaje es ASCII para que se lea bien en la consola de Windows.

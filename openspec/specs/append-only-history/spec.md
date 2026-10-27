@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Garantiza en la base de datos que los registros históricos del taller (`historial_estado_orden`, `movimiento_stock`, `historial_precio_repuesto`) sólo admiten altas: nadie, desde ningún cliente ni con ningún rol, puede modificar ni borrar sus filas (RN15), y deja evidencia reproducible del caso C-14.
+Garantiza en la base de datos que los registros históricos del taller (`historial_estado_orden`, `movimiento_stock`, `historial_precio_repuesto`) sólo admiten altas: nadie, desde ningún cliente ni con ningún rol, puede modificar ni borrar sus filas con `UPDATE` o `DELETE` (RN15), y deja evidencia reproducible del caso C-14. La garantía cubre la escritura de datos, no la administración del esquema por parte del dueño de las tablas (ver «Límites de la protección»).
 
 ## Requirements
 
@@ -61,6 +61,13 @@ El rechazo SHALL aplicarse a cualquier sesión que se conecte a la base, incluid
 #### Scenario: Borrar la orden dueña del historial
 - **WHEN** se ejecuta con SQL un `DELETE` de una orden de trabajo que tiene filas en `historial_estado_orden`
 - **THEN** la base rechaza el borrado y las filas del historial siguen existiendo
+
+### Requirement: Límites de la protección
+La protección MUST documentarse como limitada a la escritura de datos: el rol dueño de las tablas conserva la administración del esquema (`TRUNCATE`, `ALTER TABLE … DISABLE TRIGGER`, `DROP TRIGGER`), que el disparador no puede impedir. Cerrar esa vía requiere separar un rol de migración dueño del rol de la aplicación sin permisos sobre estas tablas (sección 6.9 de la consigna), mecanismo que este TP no implementa porque usa un solo rol de base.
+
+#### Scenario: Documentación del alcance
+- **WHEN** se lee la migración que instala la protección
+- **THEN** su docstring declara qué cubre (`UPDATE`/`DELETE` de cualquier rol) y qué no (`TRUNCATE` del seed, desactivar o borrar el disparador por el dueño)
 
 ### Requirement: Rechazo identificable y no confundible con un error de datos
 El rechazo SHALL informar en su mensaje la tabla y la operación rechazada, y su código de error MUST NOT pertenecer a las clases de violación de integridad (`23`) ni de error de dato (`22`), para que la aplicación no lo traduzca a una respuesta 4xx: un intento de modificar el historial es un defecto del servidor.
