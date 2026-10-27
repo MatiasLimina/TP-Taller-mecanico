@@ -5,7 +5,7 @@
 |------|-----------|----------------|
 | Lenguaje | Python | 3.12 |
 | Framework web | FastAPI (todos los handlers `async def`) | 0.111 |
-| Modelos de tabla | SQLModel | 0.0.24 |
+| Modelos de tabla | SQLModel | 0.0.45 |
 | ORM / motor | SQLAlchemy 2.0 asincrónico | 2.0 |
 | Driver | asyncpg (o psycopg 3 asincrónico) | 0.30 |
 | Base de datos | PostgreSQL | 16 |

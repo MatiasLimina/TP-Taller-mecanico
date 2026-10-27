@@ -8,6 +8,7 @@ from sqlmodel import SQLModel
 
 from alembic import context
 from app.core.config import get_settings
+from app.modules import modelos  # noqa: F401  registro unico: carga las 13 tablas en la metadata
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -21,7 +22,6 @@ if config.config_file_name is not None:
 # La conexion sale de Settings (POSTGRES_* del entorno o .env), nunca de alembic.ini.
 settings = get_settings()
 
-# C-03: importar aqui app.modules.*.models para registrar las tablas en la metadata.
 target_metadata = SQLModel.metadata
 
 # other values from the config, defined by the needs of env.py,

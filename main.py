@@ -6,6 +6,7 @@ from fastapi import APIRouter, FastAPI
 from app.core.config import get_settings
 from app.core.database import create_engine, create_session_factory
 from app.core.errores import registrar_manejadores
+import app.modules.modelos  # noqa: F401  (registra los modelos antes de la primera consulta)
 from app.modules.health.router import router as health_router
 
 
