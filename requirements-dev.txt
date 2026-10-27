@@ -1,0 +1,4 @@
+-r requirements.txt
+
+# Lint: versión fija porque las reglas por defecto cambian entre versiones (ver ruff.toml).
+ruff==0.16.10

@@ -1,0 +1,18 @@
+# Configuración de ruff compartida por el equipo y los agentes.
+#
+# Las reglas activas son las por defecto de la versión pinneada en requirements-dev.txt
+# (las mismas que se usaron al revisar C-03: I, UP, RUF, F, B, ASYNC, DTZ…). Por eso la
+# versión de ruff se fija ahí: cambiarla puede cambiar las reglas.
+#
+# Uso, antes de cada commit:
+#   ruff check .        (ruff check --fix . corrige lo automático)
+#   git diff --check
+
+target-version = "py312"
+
+# Carpetas que no son código del proyecto.
+extend-exclude = [".agents", ".claude"]
+
+[lint.isort]
+# `app` es código propio; `alembic`, `sqlmodel`, etc. van con las dependencias externas.
+known-first-party = ["app"]
