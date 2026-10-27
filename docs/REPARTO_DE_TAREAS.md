@@ -7,9 +7,9 @@
 
 | Nombre | Rol | Herramientas de IA | GitHub |
 |--------|-----|--------------------|--------|
-| **Mati** | Diseño, partes críticas y revisión | Claude Pro (Claude Code) y otras suscripciones pagas de respaldo | _completar_ |
-| **Lauti** | Implementación | GitHub Copilot (plan de estudiantes), Gemini, modelos gratuitos de OpenCode | _completar_ |
-| **Nico** | Implementación y verificación | GitHub Copilot (plan de estudiantes), Gemini, modelos gratuitos de OpenCode | _completar_ |
+| **Mati** | Diseño, partes críticas y revisión | Claude Pro (Claude Code) y otras suscripciones pagas de respaldo | [@MatiasLimina](https://github.com/MatiasLimina) |
+| **Lauti** (Lautaro Agustín Agüero) | Implementación | GitHub Copilot (plan de estudiantes), Gemini, modelos gratuitos de OpenCode | [@LautaroAguero01](https://github.com/LautaroAguero01) |
+| **Nico** (Nicolás Lionel Monjelardi) | Implementación y verificación | GitHub Copilot (plan de estudiantes), Gemini, modelos gratuitos de OpenCode | [@nicolasmonjelardi](https://github.com/nicolasmonjelardi) |
 
 ## 2. Criterio del reparto
 
@@ -177,7 +177,7 @@ Revisar especialmente esto antes de abrir un PR:
 | `seed.py` | Lo usan todos los `.http` | Lo mantiene Lauti; los demás piden datos nuevos por PR |
 
 ## 10. Pendientes de equipo
-- [ ] Completar los usuarios de GitHub en la sección 1.
+- [x] Completar los usuarios de GitHub en la sección 1.
 - [ ] Confirmar el reparto nuevo con Lauti y Nico.
 - [ ] Que Lauti y Nico verifiquen que su agente (Copilot / OpenCode / Gemini) lee `AGENTS.md`.
 - [ ] Definir el canal y la frecuencia de sincronización (qué se avisa al cerrar un gate o al dejar listo un `propose`).
