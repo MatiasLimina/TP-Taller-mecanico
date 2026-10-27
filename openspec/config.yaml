@@ -19,6 +19,13 @@ schema: spec-driven
 #     tasks:
 #       - Break tasks into chunks of max 2 hours
 
+rules:
+  tasks:
+    - >-
+      La última tarea de cada change es de lint: `ruff check .` y `git diff --check`
+      limpios con el ruff de `requirements-dev.txt` (config en `ruff.toml`). En
+      migraciones autogeneradas sólo se corrige el encabezado, nunca las operaciones.
+
 # Per-operation guidance (optional)
 # Add advisory guidance for how apply and archive work should be conducted.
 # This is separate from artifact rules above.

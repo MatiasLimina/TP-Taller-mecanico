@@ -95,6 +95,7 @@ Son contrato; romperlas es un defecto.
 **Proceso**
 - NUNCA commitear, pushear ni buildear sin que el usuario lo pida.
 - Commits con *conventional commits* (`feat:`, `fix:`, `docs:`…) y sin líneas de co-autoría de IA.
+- NUNCA commitear con `ruff check .` o `git diff --check` en rojo → usar el ruff pinneado en `requirements-dev.txt` (config en `ruff.toml`); `ruff check --fix .` corrige lo automático. En una migración autogenerada sólo se toca el encabezado (imports/tipos), nunca las operaciones.
 
 ---
 
