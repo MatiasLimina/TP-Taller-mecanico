@@ -5,7 +5,8 @@ Contrato público:
   con sal aleatoria y costo `BCRYPT_COST`, ejecutado en `asyncio.to_thread` bajo
   un semáforo de `BCRYPT_MAX_CONCURRENCY` operaciones simultáneas. Una contraseña
   de más de `MAX_BYTES_BCRYPT` bytes UTF-8 se rechaza con `PasswordInvalidaError`
-  antes de invocar bcrypt y sin truncarla.
+  antes de invocar bcrypt y sin truncarla. En el login (C-07), este error debe
+  traducirse al mismo 401 genérico que una contraseña incorrecta, nunca a un 500.
 - `crear_token_acceso(usuario_id, roles)` y `decodificar_token_acceso(token)`:
   JWT HS256 con `SECRET_KEY`, claims `sub` (texto), `iat` (numérico con
   fracción de segundo), `exp` y `roles` (informativos). Token vencido, alterado,
@@ -26,7 +27,7 @@ import asyncio
 import secrets
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bcrypt
 import jwt
@@ -97,7 +98,9 @@ async def hash_password(password: str) -> str:
     codificada = _validar_password(password)
     settings = get_settings()
     async with _semaforo():
-        hasheada = await asyncio.to_thread(_hashear_bcrypt, codificada, settings.bcrypt_cost)
+        hasheada = await asyncio.to_thread(
+            _hashear_bcrypt, codificada, settings.bcrypt_cost
+        )
     return hasheada.decode()
 
 
@@ -114,7 +117,7 @@ def crear_token_acceso(
     ahora: datetime | None = None,
 ) -> str:
     settings = get_settings()
-    marca = ahora if ahora is not None else datetime.now(timezone.utc)
+    marca = ahora if ahora is not None else datetime.now(UTC)
     if marca.tzinfo is None or marca.utcoffset() is None:
         raise ValueError("`ahora` debe ser una fecha con zona horaria.")
     iat = marca.timestamp()
@@ -142,14 +145,20 @@ def decodificar_token_acceso(token: str) -> TokenAcceso:
         )
         sub = payload["sub"]
         if not isinstance(sub, str):
+            raise TypeError
+        # ID decimal canónico: sin signo, espacios, ceros a la izquierda ni
+        # dígitos no ASCII. `int()` solo no alcanza ("-5", " 7 ", "007").
+        if not sub.isascii() or not sub.isdigit() or sub.startswith("0"):
             raise ValueError
         roles = payload.get("roles", [])
-        if not isinstance(roles, list) or not all(isinstance(rol, str) for rol in roles):
-            raise ValueError
+        if not isinstance(roles, list):
+            raise TypeError
+        if not all(isinstance(rol, str) for rol in roles):
+            raise TypeError
         return TokenAcceso(
             usuario_id=int(sub),
-            iat=datetime.fromtimestamp(float(payload["iat"]), tz=timezone.utc),
-            exp=datetime.fromtimestamp(float(payload["exp"]), tz=timezone.utc),
+            iat=datetime.fromtimestamp(float(payload["iat"]), tz=UTC),
+            exp=datetime.fromtimestamp(float(payload["exp"]), tz=UTC),
             roles=tuple(roles),
         )
     except (jwt.PyJWTError, TypeError, ValueError, OverflowError, OSError):

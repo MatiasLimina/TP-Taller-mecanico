@@ -79,7 +79,7 @@ El sistema SHALL emitir un JWT firmado con HS256 y `SECRET_KEY` cuyos claims inc
 - **THEN** el token incluye esos roles tal como se pasaron, sin consultar ni modificar la base
 
 ### Requirement: Verificación de token de acceso
-Todo token SHALL verificarse con HS256 y `SECRET_KEY`. Un token con firma inválida o alterada, vencido, con claims obligatorios faltantes o con `sub` no numérico MUST rechazarse con un error propio que no revele el motivo ni el contenido del token.
+Todo token SHALL verificarse con HS256 y `SECRET_KEY`. Un token con firma inválida o alterada, vencido, con claims obligatorios faltantes o con `sub` que no sea un ID decimal ASCII positivo y canónico MUST rechazarse con un error propio que no revele el motivo ni el contenido del token.
 
 #### Scenario: Token válido
 - **WHEN** se verifica un token recién emitido y no vencido
@@ -101,8 +101,8 @@ Todo token SHALL verificarse con HS256 y `SECRET_KEY`. Un token con firma invál
 - **WHEN** se verifica un token al que le falta `sub`, `iat` o `exp`
 - **THEN** se rechaza con el error propio de token inválido
 
-#### Scenario: sub no numérico
-- **WHEN** se verifica un token cuyo `sub` es texto no convertible a entero
+#### Scenario: sub con formato inválido
+- **WHEN** se verifica un token cuyo `sub` tiene signo, espacios, ceros a la izquierda, dígitos no ASCII o no es texto
 - **THEN** se rechaza con el error propio de token inválido
 
 #### Scenario: Error sin detalles
