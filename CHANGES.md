@@ -50,36 +50,36 @@ C-16 verificacion-http-readme  (todos los anteriores)
 
 ```
 GATE 0: C-01 ✓
-  → C-02 core-repository-uow            [Agente A]
-  → C-05 security-core                  [Agente B]
+  → C-02 core-repository-uow            [hecho]
+  → C-05 security-core                  [hecho]
 
 GATE 1: C-02 ✓
-  → C-03 domain-models-migration        [Agente A]
-  (C-05 sigue en curso en [Agente B])
+  → C-03 domain-models-migration        [hecho]
 
 GATE 2: C-03 ✓                          ← FORK
-  → C-04 append-only-trigger-migration  [Agente A]
-  → C-07 auth-registro-login            [Agente B — si C-05 ✓]
-  → C-06 seed-script                    [Agente C — si C-04 ✓ y C-05 ✓]
+  → C-04 append-only-trigger-migration  [hecho]
+  → C-07 auth-registro-login            [Matías — si C-05 ✓]
+  → C-06 seed-script                    [Lautaro — si C-04 ✓ y C-05 ✓]
+  → C-16 (sólo casos .http por adelantado) [Nicolás — desde la matriz de 03_actores_y_roles.md]
 
 GATE 3: C-07 ✓
-  → C-08 auth-session-guards            [Agente B]
+  → C-08 auth-session-guards            [Matías]
 
 GATE 4: C-08 ✓                          ← FORK
-  → C-09 roles-personal-eventos         [Agente A]
-  → C-10 clientes-vehiculos             [Agente B]
-  → C-11 repuestos-catalogo             [Agente C]
+  → C-09 roles-personal-eventos         [Matías]
+  → C-10 clientes-vehiculos             [Lautaro]
+  → C-11 repuestos-catalogo             [Nicolás]
 
 GATE 5: C-11 ✓
-  → C-12 repuestos-stock-precios        [Agente C]
-  → C-13 ordenes-alta-estados           [Agente B — si C-10 ✓ además]
+  → C-12 repuestos-stock-precios        [Nicolás — revisión de Matías]
+  → C-13 ordenes-alta-estados           [Matías — si C-10 ✓ además]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
-  → C-14 ordenes-transiciones           [Agente B]
-  → C-15 ordenes-lecturas-sin-n-plus-1  [Agente A]
+  → C-14 ordenes-transiciones           [Matías]
+  → C-15 ordenes-lecturas-sin-n-plus-1  [Lautaro]
 
 GATE 7: C-09, C-14, C-15, C-06 ✓
-  → C-16 verificacion-http-readme       [Agente A/B/C — reparto por módulo]
+  → C-16 verificacion-http-readme       [Nicolás — cierre; cada uno aporta los casos de su módulo]
 ```
 
 ### Camino crítico (9 changes — mínimo irreducible)
@@ -88,21 +88,31 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 
 (C-05 corre en paralelo a C-02/C-03 y no alarga el camino; C-14 además requiere C-12, que se completa en paralelo a C-10/C-13. C-16 es el último indispensable; C-09, C-15 y C-06 son requisitos previos de C-16 fuera de la cadena.)
 
-### Plan óptimo con 3 agentes
+### Reparto del equipo
 
-| Paso | Agente A (Backend Core / datos) | Agente B (Auth + órdenes) | Agente C (Repuestos / seed / verificación) |
-|------|--------------------------------|---------------------------|---------------------------------------------|
-| 1 | C-01 foundation-setup | — | — |
-| 2 | C-02 core-repository-uow | C-05 security-core | — |
-| 3 | C-03 domain-models-migration | (cont. C-05) | — |
-| 4 | C-04 append-only-trigger-migration | C-07 auth-registro-login | — |
-| 5 | C-09 roles-personal-eventos (tras C-08) | C-08 auth-session-guards | C-06 seed-script |
-| 6 | C-09 roles-personal-eventos | C-10 clientes-vehiculos | C-11 repuestos-catalogo |
-| 7 | — | C-13 ordenes-alta-estados | C-12 repuestos-stock-precios |
-| 8 | C-15 ordenes-lecturas-sin-n-plus-1 | C-14 ordenes-transiciones | — |
-| 9 | C-16 (usuarios + clientes + lecturas) | C-16 (órdenes) | C-16 (repuestos + README + ciclo de migraciones) |
+El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA de plan pago y se ocupa del diseño y de lo crítico. Lautaro y Nicolás trabajan con GitHub Copilot (plan de estudiantes), Gemini y los modelos gratuitos de OpenCode, e implementan changes ya especificados.
 
-> Nota: en el paso 5 el Agente A espera a C-08; si C-08 no cerró, tomar C-06 antes. Los pasos son orientativos; lo que manda son las dependencias.
+| Quién | Rol | Tareas |
+|-------|-----|--------|
+| **Matías** | Diseño, partes críticas y revisión | `propose` de **todos** los changes (C-06…C-16); `apply` de C-07, C-08, C-09, C-13 y C-14 (CRITICO/ALTO); revisión de todos los PR; `archive` |
+| **Lautaro** | Implementación | `apply` de C-06 seed-script, C-10 clientes-vehiculos y C-15 ordenes-lecturas-sin-n-plus-1 |
+| **Nicolás** | Implementación y verificación | `apply` de C-11 repuestos-catalogo, C-12 repuestos-stock-precios (con revisión de Matías) y C-16 verificacion-http-readme |
+
+| Paso | Matías | Lautaro | Nicolás |
+|------|--------|---------|---------|
+| 1-4 | C-01 a C-05 ✓ | — | — |
+| 5 | C-07 auth-registro-login · `propose` de C-06, C-10, C-11 | C-06 seed-script | Casos `.http` de C-16 por adelantado (matriz endpoint↔rol) |
+| 6 | C-08 auth-session-guards · `propose` de C-12, C-15 | (cont. C-06) | (cont. casos `.http`) |
+| 7 | C-09 roles-personal-eventos | C-10 clientes-vehiculos | C-11 repuestos-catalogo |
+| 8 | C-13 ordenes-alta-estados | (cont. C-10) | C-12 repuestos-stock-precios |
+| 9 | C-14 ordenes-transiciones | C-15 ordenes-lecturas-sin-n-plus-1 | (cont. C-12) |
+| 10 | Revisión final + `archive` | Casos `.http` de clientes y lecturas | C-16 (cierre: README + ciclo de migraciones) |
+
+> **Cuello de botella:** C-07 y C-08 (Matías). Hasta que cierren, sólo avanzan C-06 y los casos `.http`. Por eso Matías adelanta los `propose` de C-10 y C-11 en paralelo, para que estén listos al cerrar C-08.
+>
+> **Convención para los `tasks.md`:** como el `apply` lo hacen modelos más chicos, cada tarea indica el archivo exacto, la firma de la función o del endpoint, la regla dura que aplica y el caso `.http` que tiene que pasar. Una tarea ambigua se reescribe antes de asignarla, no se deja a criterio del modelo.
+>
+> Los pasos son orientativos; lo que manda son las dependencias.
 
 ---
 
