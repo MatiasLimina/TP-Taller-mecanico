@@ -1,7 +1,7 @@
 """esquema inicial
 
 Revision ID: 1c921a1fe62f
-Revises: 
+Revises:
 Create Date: 2026-10-27 09:31:45.276737
 
 Leída antes de aplicar (2026-10-27, apply de C-03 contra design D4/D5/D7): migración autogenerada
@@ -22,18 +22,17 @@ sobre una base vacía, sin ediciones manuales de las operaciones. Verificado en 
 No editar las operaciones a mano: si hace falta un cambio, corregir el modelo y regenerar.
 
 """
-from typing import Sequence, Union
+from collections.abc import Sequence
 
-from alembic import op
 import sqlalchemy as sa
 import sqlmodel
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = '1c921a1fe62f'
-down_revision: Union[str, Sequence[str], None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

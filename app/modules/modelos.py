@@ -15,7 +15,11 @@ from app.modules.ordenes.models import (
     ItemOrden,
     OrdenTrabajo,
 )
-from app.modules.repuestos.models import HistorialPrecioRepuesto, MovimientoStock, Repuesto
+from app.modules.repuestos.models import (
+    HistorialPrecioRepuesto,
+    MovimientoStock,
+    Repuesto,
+)
 from app.modules.usuarios.models import (
     AsignacionRol,
     EventoSeguridad,
