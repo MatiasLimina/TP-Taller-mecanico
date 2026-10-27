@@ -58,7 +58,7 @@ GATE 1: C-02 ✓
 
 GATE 2: C-03 ✓                          ← FORK
   → C-04 append-only-trigger-migration  [hecho]
-  → C-07 auth-registro-login            [Matías — si C-05 ✓]
+  → C-07 auth-registro-login            [hecho]
   → C-06 seed-script                    [Lautaro — si C-04 ✓ y C-05 ✓]
   → C-16 (sólo casos .http por adelantado) [Nicolás — desde la matriz de 03_actores_y_roles.md]
 
@@ -226,7 +226,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
   - `knowledge-base/06_funcionalidades.md` §Épica 8 (US-070)
 
 ### [C-07] `auth-registro-login`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `usuarios` (models/schemas/repository/unit_of_work/service/router) con `AsignacionRol`, `IntentoAcceso`, `EventoSeguridad`
   - `POST /auth/registro`: hash antes de abrir la transacción; un UoW crea `usuario` + `asignacion_rol(CLIENTE)` + `cliente` + `evento_seguridad`; correo/documento repetido → 409 sin filas sueltas; documento de cliente existente → 409 (RN02). Casos PDF C02
