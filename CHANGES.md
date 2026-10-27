@@ -216,6 +216,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
   - Clientes: Laura (con usuario, 2 vehículos), Jorge (sin usuario, 1 vehículo); repuestos con movimiento "Stock inicial"; órdenes #1 PENDIENTE y #2 EN_REPARACION (4 bujías con stock 2, a propósito); historial de precio 8000 → 8500; evento de seguridad actor `SISTEMA`
   - Hashes generados con `security.py`
   - Correos cargados en minúsculas: `seed.py` verifica al cargar y falla (o los normaliza) si alguno tiene mayúsculas o espacios; la API los normaliza y la base no lo impone, porque la consigna admite sólo dos migraciones (S-01 de C-07)
+  - Correos con dominio válido para `EmailStr` (p. ej. `@taller.com` o `@example.com`): el login los valida y rechaza dominios de uso especial como `.local`, `.test` o `.localhost` con 422, así que un usuario del seed con esos dominios nunca podría iniciar sesión (revisión de C-07)
 - **Dependencias**: `C-04, C-05`
 - **Governance**: MEDIO (datos de prueba; credenciales ficticias, nunca reales)
 - **Leer antes**:

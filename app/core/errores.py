@@ -2,9 +2,10 @@
 
 Convención (la heredan todos los módulos):
 
-- Los SERVICIOS lanzan `NoEncontrado` (404), `Conflicto` (409) o `EntradaInvalida` (422)
-  con un mensaje propio en español; no conocen HTTP. Un manejador global los traduce a
-  `{"detail": mensaje}`.
+- Los SERVICIOS lanzan `NoAutenticado` (401), `NoEncontrado` (404), `Conflicto` (409),
+  `EntradaInvalida` (422) o `DemasiadosIntentos` (429) con un mensaje propio en español;
+  no conocen HTTP. Un manejador global los traduce a `{"detail": mensaje}`.
+  `DemasiadosIntentos(mensaje, retry_after)` agrega el encabezado `Retry-After` (segundos).
 - Un error de integridad específico se traduce en el servicio, FUERA del bloque del Unit of
   Work, con `restriccion_violada(exc)` (requiere restricciones con nombre estable, C-03).
   Sin traducción propia, el manejador global responde un mensaje genérico propio.
@@ -34,10 +35,16 @@ _SQLSTATE_CONFLICTO = {"23505", "23503"}
 
 class ErrorDeAplicacion(Exception):
     status_code: int = 500
+    # Encabezados extra de la respuesta (p. ej. `Retry-After` del 429); la mayoría no lleva.
+    headers: dict[str, str] | None = None
 
     def __init__(self, mensaje: str) -> None:
         super().__init__(mensaje)
         self.mensaje = mensaje
+
+
+class NoAutenticado(ErrorDeAplicacion):
+    status_code = 401
 
 
 class NoEncontrado(ErrorDeAplicacion):
@@ -50,6 +57,14 @@ class Conflicto(ErrorDeAplicacion):
 
 class EntradaInvalida(ErrorDeAplicacion):
     status_code = 422
+
+
+class DemasiadosIntentos(ErrorDeAplicacion):
+    status_code = 429
+
+    def __init__(self, mensaje: str, retry_after: int) -> None:
+        super().__init__(mensaje)
+        self.headers = {"Retry-After": str(retry_after)}
 
 
 def sqlstate(exc: BaseException) -> str | None:
@@ -85,13 +100,15 @@ def _es_error_de_dato(exc: DBAPIError) -> bool:
     return causa is not None and any(c.__name__ == "DataError" for c in type(causa).__mro__)
 
 
-def _respuesta(status_code: int, detail: object) -> JSONResponse:
-    return JSONResponse(status_code=status_code, content={"detail": detail})
+def _respuesta(
+    status_code: int, detail: object, headers: dict[str, str] | None = None
+) -> JSONResponse:
+    return JSONResponse(status_code=status_code, content={"detail": detail}, headers=headers)
 
 
 async def _manejar_aplicacion(request: Request, exc: Exception) -> JSONResponse:
     assert isinstance(exc, ErrorDeAplicacion)
-    return _respuesta(exc.status_code, exc.mensaje)
+    return _respuesta(exc.status_code, exc.mensaje, exc.headers)
 
 
 async def _manejar_integridad(request: Request, exc: Exception) -> JSONResponse:

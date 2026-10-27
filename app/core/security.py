@@ -5,8 +5,9 @@ Contrato público:
   con sal aleatoria y costo `BCRYPT_COST`, ejecutado en `asyncio.to_thread` bajo
   un semáforo de `BCRYPT_MAX_CONCURRENCY` operaciones simultáneas. Una contraseña
   de más de `MAX_BYTES_BCRYPT` bytes UTF-8 se rechaza con `PasswordInvalidaError`
-  antes de invocar bcrypt y sin truncarla. En el login (C-07), este error debe
-  traducirse al mismo 401 genérico que una contraseña incorrecta, nunca a un 500.
+  antes de invocar bcrypt y sin truncarla. En el login (C-07) el DTO rechaza con
+  422 una contraseña de más de 72 bytes antes de llegar al servicio; si igual
+  llegara, el servicio traduce este error al 401 genérico, nunca a un 500.
 - `crear_token_acceso(usuario_id, roles)` y `decodificar_token_acceso(token)`:
   JWT HS256 con `SECRET_KEY`, claims `sub` (texto), `iat` (numérico con
   fracción de segundo), `exp` y `roles` (informativos). Token vencido, alterado,
