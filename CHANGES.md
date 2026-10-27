@@ -185,7 +185,7 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 ## FASE 3 — Autenticación y autorización (Ej.4 y Ej.5, 16 % + 14 %)
 
 ### [C-05] `security-core`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `app/core/security.py`: hash/verificación bcrypt en `asyncio.to_thread` bajo semáforo (`BCRYPT_MAX_CONCURRENCY`), costo desde Settings; validación ≤ 72 bytes (bytes, no caracteres)
   - Emisión/verificación JWT (PyJWT): claims `sub`, `iat` con fracción, `exp`, roles vigentes (informativos); cookie `access_token` HttpOnly, SameSite=Lax, Max-Age, `Secure` configurable; no se acepta `Authorization: Bearer`
