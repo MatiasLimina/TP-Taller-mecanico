@@ -5,6 +5,7 @@ from fastapi import APIRouter, FastAPI
 
 from app.core.config import get_settings
 from app.core.database import create_engine, create_session_factory
+from app.core.errores import registrar_manejadores
 from app.core.security import crear_hash_ficticio
 from app.modules.health.router import router as health_router
 
@@ -24,6 +25,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Taller mecánico", lifespan=lifespan)
+registrar_manejadores(app)
 
 # Grupo de rutas públicas. C-08 agrega `rutas_protegidas` al lado.
 rutas_abiertas = APIRouter()

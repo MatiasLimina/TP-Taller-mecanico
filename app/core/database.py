@@ -28,7 +28,7 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:
-    # Sin commit ni rollback: la transacción es del UoW (C-02).
+    # Sin commit ni rollback: la transacción es de `UnitOfWork` (app/core/unit_of_work.py).
     async with request.app.state.session_factory() as session:
         yield session
 
