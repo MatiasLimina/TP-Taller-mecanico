@@ -150,7 +150,7 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
   - `knowledge-base/09_decisiones_y_supuestos.md`
 
 ### [C-03] `domain-models-migration`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Modelos SQLModel de las 13 tablas: dominio usuarios (`usuario`, `asignacion_rol`, `intento_acceso`, `evento_seguridad`), clientes (`cliente`, `vehiculo`), repuestos (`repuesto`, `movimiento_stock`, `historial_precio_repuesto`), ordenes (`estado_orden`, `orden_trabajo`, `item_orden`, `historial_estado_orden`); nombres de tablas/columnas obligatorios
   - Relaciones: asociación, composición (`item_orden` ◆ `orden_trabajo`), uno a uno opcional `Usuario.cliente` (objeto, no lista; `uselist=False`), catálogo traducido; navegación declarada en ambos extremos; toda FK con índice
