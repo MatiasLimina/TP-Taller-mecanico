@@ -67,19 +67,19 @@ GATE 3: C-07 ✓
 
 GATE 4: C-08 ✓                          ← FORK
   → C-09 roles-personal-eventos         [Matías]
-  → C-10 clientes-vehiculos             [Lautaro]
-  → C-11 repuestos-catalogo             [Nicolás]
+  → C-10 clientes-vehiculos             [Lautaro — propose de Nicolás]
+  → C-11 repuestos-catalogo             [Matías — propose de Nicolás]
 
 GATE 5: C-11 ✓
-  → C-12 repuestos-stock-precios        [Nicolás — revisión de Matías]
-  → C-13 ordenes-alta-estados           [Matías — si C-10 ✓ además]
+  → C-12 repuestos-stock-precios        [Matías — propose de Nicolás]
+  → C-13 ordenes-alta-estados           [Nicolás — si C-10 ✓ además]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
-  → C-14 ordenes-transiciones           [Matías]
-  → C-15 ordenes-lecturas-sin-n-plus-1  [Lautaro]
+  → C-14 ordenes-transiciones           [Nicolás — revisión de Matías]
+  → C-15 ordenes-lecturas-sin-n-plus-1  [Lautaro — propose de Nicolás]
 
 GATE 7: C-09, C-14, C-15, C-06 ✓
-  → C-16 verificacion-http-readme       [Nicolás — cierre; cada uno aporta los casos de su módulo]
+  → C-16 verificacion-http-readme       [Lautaro — cierre; cada uno aporta los casos de su módulo]
 ```
 
 ### Camino crítico (9 changes — mínimo irreducible)
@@ -90,27 +90,32 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 
 ### Reparto del equipo
 
-El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA de plan pago y se ocupa del diseño y de lo crítico. Lautaro y Nicolás trabajan con GitHub Copilot (plan de estudiantes), Gemini y los modelos gratuitos de OpenCode, e implementan changes ya especificados.
+El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herramientas de IA de plan pago (Claude) y se ocupan del diseño y de lo crítico. Lautaro trabaja con GitHub Copilot (plan de estudiantes), Gemini y los modelos gratuitos de OpenCode, e implementa changes ya especificados.
+
+> **Reparto actualizado (2026-10-28):** con C-01…C-05, C-07 y C-08 archivados y C-09 en curso, Nicolás pasa a hacer los `propose` de C-10 en adelante y el `apply` de las órdenes (C-13, C-14). Matías toma repuestos (C-11, C-12) y Lautaro el cierre (C-16).
 
 | Quién | Rol | Tareas |
 |-------|-----|--------|
-| **Matías** | Diseño, partes críticas y revisión | `propose` de **todos** los changes (C-06…C-16); `apply` de C-07, C-08, C-09, C-13 y C-14 (CRITICO/ALTO); revisión de todos los PR; `archive` |
-| **Lautaro** | Implementación | `apply` de C-06 seed-script, C-10 clientes-vehiculos y C-15 ordenes-lecturas-sin-n-plus-1 |
-| **Nicolás** | Implementación y verificación | `apply` de C-11 repuestos-catalogo, C-12 repuestos-stock-precios (con revisión de Matías) y C-16 verificacion-http-readme |
+| **Matías** | Partes críticas, revisión y cierre | `propose` de C-06…C-09; `apply` de C-07, C-08, C-09 (CRITICO), C-11 repuestos-catalogo y C-12 repuestos-stock-precios; revisión de todos los PR (en especial los propose y applies de Nicolás); `archive` |
+| **Nicolás** | Diseño y órdenes | `propose` de C-10…C-16; `apply` de C-13 ordenes-alta-estados y C-14 ordenes-transiciones (con revisión de Matías); casos `.http` de C-16 por adelantado |
+| **Lautaro** | Implementación y verificación | `apply` de C-06 seed-script, C-10 clientes-vehiculos, C-15 ordenes-lecturas-sin-n-plus-1 y C-16 verificacion-http-readme |
 
 | Paso | Matías | Lautaro | Nicolás |
 |------|--------|---------|---------|
 | 1-4 | C-01 a C-05 ✓ | — | — |
-| 5 | C-07 auth-registro-login · `propose` de C-06, C-10, C-11 | C-06 seed-script | Casos `.http` de C-16 por adelantado (matriz endpoint↔rol) |
-| 6 | C-08 auth-session-guards · `propose` de C-12, C-15 | (cont. C-06) | (cont. casos `.http`) |
-| 7 | C-09 roles-personal-eventos | C-10 clientes-vehiculos | C-11 repuestos-catalogo |
-| 8 | C-13 ordenes-alta-estados | (cont. C-10) | C-12 repuestos-stock-precios |
-| 9 | C-14 ordenes-transiciones | C-15 ordenes-lecturas-sin-n-plus-1 | (cont. C-12) |
-| 10 | Revisión final + `archive` | Casos `.http` de clientes y lecturas | C-16 (cierre: README + ciclo de migraciones) |
+| 5 | C-07 auth-registro-login ✓ | — | Casos `.http` de C-16 por adelantado (matriz endpoint↔rol) |
+| 6 | C-08 auth-session-guards ✓ | — | (cont. casos `.http`) |
+| 7 | C-09 roles-personal-eventos · `propose` de C-06 | C-06 seed-script | `propose` de C-10, C-11, C-12 |
+| 8 | C-11 repuestos-catalogo | C-10 clientes-vehiculos | `propose` de C-13, C-14, C-15, C-16 |
+| 9 | C-12 repuestos-stock-precios | (cont. C-10) | C-13 ordenes-alta-estados |
+| 10 | Revisión de C-13 | C-15 ordenes-lecturas-sin-n-plus-1 | C-14 ordenes-transiciones |
+| 11 | Revisión final + `archive` | C-16 (cierre: README + ciclo de migraciones) | Casos `.http` de órdenes |
 
-> **Cuello de botella:** C-07 y C-08 (Matías). Hasta que cierren, sólo avanzan C-06 y los casos `.http`. Por eso Matías adelanta los `propose` de C-10 y C-11 en paralelo, para que estén listos al cerrar C-08.
+> **Cuello de botella:** los `propose` de C-10 y C-11 (Nicolás, paso 7). Lautaro y Matías no pueden arrancar C-10/C-11 hasta tenerlos. Si Nicolás no tiene todavía el entorno listo (CLAUDE.md global con OPSX, engram y `.atl/skill-registry.md`, que no se versionan), Matías hace esos dos `propose` para no frenar al resto.
 >
-> **Convención para los `tasks.md`:** como el `apply` lo hacen modelos más chicos, cada tarea indica el archivo exacto, la firma de la función o del endpoint, la regla dura que aplica y el caso `.http` que tiene que pasar. Una tarea ambigua se reescribe antes de asignarla, no se deja a criterio del modelo.
+> **Revisión cruzada:** cuando Nicolás hace el `propose` y el `apply` del mismo change (C-13, C-14), Matías revisa los dos antes del merge, porque si no nadie más mira ese diseño.
+>
+> **Convención para los `tasks.md`:** los changes que implementa Lautaro (C-06, C-10, C-15, C-16) los hacen modelos más chicos, así que cada tarea indica el archivo exacto, la firma de la función o del endpoint, la regla dura que aplica y el caso `.http` que tiene que pasar. Una tarea ambigua se reescribe antes de asignarla, no se deja a criterio del modelo. Se mantiene la misma convención en todos los changes, para que cualquiera pueda tomar cualquiera.
 >
 > Los pasos son orientativos; lo que manda son las dependencias.
 
