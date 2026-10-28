@@ -222,6 +222,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Hashes generados con `security.py`
   - Correos cargados en minúsculas: `seed.py` verifica al cargar y falla (o los normaliza) si alguno tiene mayúsculas o espacios; la API los normaliza y la base no lo impone, porque la consigna admite sólo dos migraciones (S-01 de C-07)
   - Correos con dominio válido para `EmailStr` (p. ej. `@taller.com` o `@example.com`): el login los valida y rechaza dominios de uso especial como `.local`, `.test` o `.localhost` con 422, así que un usuario del seed con esos dominios nunca podría iniciar sesión (revisión de C-07)
+  - **Heredado de C-09** (S-09): el primer ADMIN del seed se crea **sin `vence_en`**; RN05 sólo cuenta ADMIN vigentes sin vencimiento, así que un ADMIN con vencimiento no protege al sistema de quedar sin administradores
 - **Dependencias**: `C-04, C-05`
 - **Governance**: MEDIO (datos de prueba; credenciales ficticias, nunca reales)
 - **Leer antes**:
@@ -261,7 +262,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - `knowledge-base/06_funcionalidades.md` §Épica 2 (US-012), §Épica 3 (US-022)
 
 ### [C-09] `roles-personal-eventos`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `POST /usuarios` (ADMIN): alta de personal con contraseña provisoria y `debe_cambiar_password=true`; correo repetido → 409
   - `POST /usuarios/{id}/roles` (vencimiento opcional tz-aware y futuro, si no 422; duplicado vigente → 409; reasignar rol vencido cierra la fila previa y abre otra), `GET /usuarios/{id}/roles`, `DELETE /usuarios/{id}/roles/{rol}` (revoca sin borrar; ADMIN no se auto-revoca; nunca 0 admins → 409, RN05)
