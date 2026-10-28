@@ -12,6 +12,7 @@ from app.core.errores import registrar_manejadores
 from app.core.security import crear_hash_ficticio
 from app.modules.health.router import router as health_router
 from app.modules.usuarios.router import router as auth_router
+from app.modules.usuarios.router import router_eventos, router_personal
 
 
 @asynccontextmanager
@@ -38,10 +39,13 @@ rutas_abiertas.include_router(auth_router)
 
 # Grupo de rutas protegidas (RN06): exige sesión y, si el usuario debe cambiar la contraseña,
 # responde 403 en toda ruta del grupo. El control se monta UNA vez acá; no va en ningún router.
-# C-09+: incluir sus routers con `rutas_protegidas.include_router(...)` ANTES de
+# Cada módulo incluye sus routers con `rutas_protegidas.include_router(...)` ANTES de
 # `app.include_router(rutas_protegidas)`: `include_router` copia las rutas en ese momento y lo
-# que se agregue después no queda montado.
+# que se agregue después no queda montado. C-09: personal, roles de un usuario y eventos
+# (sólo ADMIN); C-10+ suman los suyos.
 rutas_protegidas = APIRouter(dependencies=[Depends(exigir_password_al_dia)])
+rutas_protegidas.include_router(router_personal)
+rutas_protegidas.include_router(router_eventos)
 
 app.include_router(rutas_abiertas)
 app.include_router(rutas_protegidas)

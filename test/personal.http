@@ -1,0 +1,788 @@
+# =============================================================================
+# test/personal.http -- Casos de C-09 roles-personal-eventos
+#   (alta de personal: POST /usuarios; roles de un usuario: POST|GET /usuarios/{id}/roles,
+#    DELETE /usuarios/{id}/roles/{rol}; historial de seguridad: GET /eventos)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada seccion).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin usuarios):
+#
+#   -- limpia SOLO las filas de este archivo (todos sus correos terminan en @personal.example.com):
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@personal.example.com'
+#     OR accion LIKE '%@personal.example.com%';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@personal.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@personal.example.com')
+#     OR otorgada_por IN (SELECT id FROM usuario WHERE email LIKE '%@personal.example.com');
+#   DELETE FROM cliente WHERE documento IN ('42000001', '42000002') OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@personal.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@personal.example.com';
+#
+# Los correos y documentos de este archivo son unicos: el archivo es de una sola
+# pasada sobre ese estado. Si C-06 (seed) ya existe, correr `python seed.py` antes y
+# luego el bloque de arriba. GET /eventos lista TODO el historial: los totales se
+# comparan con SELECT count(*) FROM evento_seguridad, no con un numero fijo.
+#
+# Reutilizar una sesion: `Cookie: {{loginJefa.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Personas: jefa (ADMIN, la crea el INSERT del caso 1), cliente (solo CLIENTE),
+# nuevo y otra (personal dado de alta por jefa).
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de jefa@personal.example.com
+# Esperado: 201 con {id, email: "jefa@personal.example.com", nombre, cliente:{...}}
+# Despues (psql): jefa pasa a ser el primer ADMIN, SIN vence_en (RN05, S-09: con
+# vencimiento, el caso 62 no probaria la regla y toda revocacion de ADMIN daria 409):
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'ADMIN' FROM usuario WHERE email = 'jefa@personal.example.com';
+# @name registroJefa
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jefa@personal.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Josefina Jefa",
+  "documento": "42000001",
+  "telefono": "1155550001"
+}
+
+### 2. Registro de cliente@personal.example.com
+# Esperado: 201
+# @name registroCliente
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "cliente@personal.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Carlos Cliente",
+  "documento": "42000002",
+  "telefono": "1155550002"
+}
+
+### 3. Login de jefa
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+#   y debe_cambiar_password: false
+# @name loginJefa
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "jefa@personal.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 4. Login de cliente
+# Esperado: 200
+# @name loginCliente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cliente@personal.example.com",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# B. Grupo protegido sobre rutas reales (spec staff-accounts, role-assignment y
+#    security-events; PDF C-09 / C-06 parte 401-403)
+# =============================================================================
+
+### 5. GET /eventos sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/eventos
+
+### 6. GET /eventos con la sesion de un cliente (solo CLIENTE)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 7. POST /usuarios con la sesion de un cliente y cuerpo valido
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: no existe intruso:
+#   SELECT count(*) FROM usuario WHERE email = 'intruso@personal.example.com';  -- 0
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+{
+  "email": "intruso@personal.example.com",
+  "nombre": "Ivan Intruso",
+  "password_provisoria": "Provisoria9"
+}
+
+### 8. POST /usuarios sin cookie y con un campo extra
+# La sesion se exige antes que el contrato del cuerpo.
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"} (NO 422)
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+
+{
+  "email": "intruso@personal.example.com",
+  "nombre": "Ivan Intruso",
+  "password_provisoria": "Provisoria9",
+  "rol": "ADMIN"
+}
+
+### 9. POST /usuarios sin cookie y JSON mal formado
+# FastAPI decodifica el cuerpo antes de resolver dependencias (unica excepcion al orden).
+# Esperado: 422 con type "json_invalid"
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+
+{"email":
+
+### 10. GET /usuarios con la sesion de jefa (no hay listado de usuarios, IN-02)
+# Esperado: 405 (Allow: POST), sin cuerpo de usuarios
+# @no-cookie-jar
+GET {{base}}/usuarios
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Alta de personal (spec staff-accounts)
+# =============================================================================
+
+### 11. Campo reservado rol en el cuerpo
+# Esperado: 422 con loc ["body", "rol"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "nuevo@personal.example.com",
+  "nombre": "Nora Nueva",
+  "password_provisoria": "Provisoria1",
+  "rol": "ADMIN"
+}
+
+### 12. password_provisoria de 7 caracteres (minimo 8)
+# Esperado: 422 sobre ["body", "password_provisoria"], sin el valor enviado en la respuesta
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "nuevo@personal.example.com",
+  "nombre": "Nora Nueva",
+  "password_provisoria": "Corta12"
+}
+
+### 13. password_provisoria de 37 caracteres n con tilde (74 bytes)
+# Esperado: 422 sobre ["body", "password_provisoria"] (NO 500)
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "nuevo@personal.example.com",
+  "nombre": "Nora Nueva",
+  "password_provisoria": "ñññññññññññññññññññññññññññññññññññññ"
+}
+
+### 14. email sin formato de direccion
+# Esperado: 422 sobre ["body", "email"]
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "no-es-correo",
+  "nombre": "Nora Nueva",
+  "password_provisoria": "Provisoria1"
+}
+
+### 15. Alta de nuevo (correo y nombre normalizados)
+# Esperado: 201 {id, email: "nuevo@personal.example.com", nombre: "Nora Nueva", activo: true,
+#   debe_cambiar_password: true}; SIN Set-Cookie, SIN password ni password_hash.
+# psql: sin roles ni ficha, hash bcrypt de costo 12 y una linea de evento:
+#   SELECT count(*) FROM asignacion_rol WHERE usuario_id = (SELECT id FROM usuario WHERE email = 'nuevo@personal.example.com');  -- 0
+#   SELECT count(*) FROM cliente WHERE usuario_id = (SELECT id FROM usuario WHERE email = 'nuevo@personal.example.com');  -- 0
+#   SELECT left(password_hash, 7), debe_cambiar_password, activo FROM usuario WHERE email = 'nuevo@personal.example.com';  -- $2b$12$ | t | t
+#   SELECT actor, accion FROM evento_seguridad WHERE accion LIKE 'Alta de personal%nuevo@%';
+#     -- jefa@personal.example.com | Alta de personal: nuevo@personal.example.com
+# @name altaNuevo
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": " Nuevo@Personal.example.com ",
+  "nombre": "  Nora Nueva ",
+  "password_provisoria": "Provisoria1"
+}
+
+### 16. Mismo correo con otras mayusculas
+# Esperado: 409 {"detail": "El correo ya está registrado"} (sin texto de la base)
+# psql: la cantidad de filas de evento_seguridad no cambia respecto del caso 15.
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "NUEVO@personal.example.com",
+  "nombre": "Otra Nora",
+  "password_provisoria": "Provisoria1"
+}
+
+### 17. Correo de un cliente auto-registrado
+# Esperado: 409 {"detail": "El correo ya está registrado"}; la cuenta del cliente no cambia
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "cliente@personal.example.com",
+  "nombre": "Carlos Cliente",
+  "password_provisoria": "Provisoria1"
+}
+
+### 18. Alta de otra
+# Esperado: 201 con debe_cambiar_password: true
+# @name altaOtra
+# @no-cookie-jar
+POST {{base}}/usuarios
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "email": "otra@personal.example.com",
+  "nombre": "Olga Otra",
+  "password_provisoria": "Provisoria2"
+}
+
+### 19. Primer login de nuevo con la contrasena provisoria
+# Esperado: 200 con debe_cambiar_password: true
+# @name loginNuevo
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nuevo@personal.example.com",
+  "password": "Provisoria1"
+}
+
+### 20. GET /auth/yo de nuevo (recien dado de alta)
+# Esperado: 200 con roles_vigentes: [] y debe_cambiar_password: true
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+# =============================================================================
+# D. Asignacion y consulta de roles (spec role-assignment)
+# =============================================================================
+
+### 21. Asignar MECANICO a nuevo
+# Esperado: 201 {id, usuario_id: <nuevo>, rol: "MECANICO", desde, vence_en: null,
+#   revocada_en: null, otorgada_por: <id de jefa>, vigente: true}
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "MECANICO"
+}
+
+### 22. Asignar otra vez MECANICO (RN03)
+# Esperado: 409 {"detail": "El usuario ya tiene el rol MECANICO vigente"}
+# psql: una sola fila abierta de MECANICO para nuevo.
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "MECANICO"
+}
+
+### 23. Asignar MECANICO vigente con otro vencimiento
+# Esperado: 409 {"detail": "El usuario ya tiene el rol MECANICO vigente"} (el vencimiento no cambia nada)
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "MECANICO",
+  "vence_en": "2099-01-01T00:00:00Z"
+}
+
+### 24. vence_en sin zona horaria
+# Esperado: 422 sobre ["body", "vence_en"] ("El vencimiento debe indicar la zona horaria")
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "2099-01-01T00:00:00"
+}
+
+### 25. vence_en en el pasado
+# Esperado: 422 sobre ["body", "vence_en"] ("El vencimiento debe ser una fecha futura")
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "2020-01-01T00:00:00Z"
+}
+
+### 26. Rol fuera del catalogo
+# Esperado: 422 sobre ["body", "rol"]
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "SUPERVISOR"
+}
+
+### 27. Campo otorgada_por en el cuerpo
+# Esperado: 422 con loc ["body", "otorgada_por"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION",
+  "otorgada_por": 1
+}
+
+### 28. Asignar a un usuario inexistente
+# Esperado: 404 {"detail": "El usuario no existe"}
+# @no-cookie-jar
+POST {{base}}/usuarios/999999/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION"
+}
+
+### 29. Id de ruta no entero
+# Esperado: 422 (el handler no se ejecuta)
+# @no-cookie-jar
+POST {{base}}/usuarios/abc/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION"
+}
+
+### 30. RECEPCION con vencimiento en otra zona horaria
+# Esperado: 201 con vence_en: "2099-01-01T03:00:00Z" (se guarda en UTC), vigente: true
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "2099-01-01T00:00:00-03:00"
+}
+
+### 31. Asignar ADMIN a otra (sin vencimiento)
+# Esperado: 201 con rol: "ADMIN", vigente: true
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "ADMIN"
+}
+
+### 32. GET roles de nuevo
+# Esperado: 200 {usuario_id, email, nombre, roles_vigentes: ["MECANICO", "RECEPCION"],
+#   asignaciones: [2 filas, ambas vigente: true, en orden de desde]}; SIN password_hash.
+# @no-cookie-jar
+GET {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 33. GET roles de un usuario inexistente
+# Esperado: 404 {"detail": "El usuario no existe"}
+# @no-cookie-jar
+GET {{base}}/usuarios/999999/roles
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 34. GET /eventos?size=1: lo mas reciente primero
+# Esperado: 200 con 1 item: actor "jefa@personal.example.com", accion
+#   "Asignación del rol ADMIN a otra@personal.example.com" (el caso 31), y total igual a
+#   SELECT count(*) FROM evento_seguridad; page 1, size 1.
+# @no-cookie-jar
+GET {{base}}/eventos?size=1
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# E. Cambio obligatorio sobre una ruta protegida real (PDF C-09)
+# =============================================================================
+
+### 35. Login de otra con la contrasena provisoria (tiene ADMIN vigente)
+# Esperado: 200 con debe_cambiar_password: true
+# @name loginOtra
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "otra@personal.example.com",
+  "password": "Provisoria2"
+}
+
+### 36. GET /eventos con cambio pendiente (aunque tenga ADMIN)
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginOtra.response.headers.Set-Cookie}}
+
+### 37. POST /usuarios/{nuevo}/roles con cambio pendiente
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}; no se escribe nada
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginOtra.response.headers.Set-Cookie}}
+
+{
+  "rol": "CLIENTE"
+}
+
+### 38. GET /auth/yo con cambio pendiente (el grupo abierto responde)
+# Esperado: 200 con debe_cambiar_password: true y roles_vigentes: ["ADMIN"]
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginOtra.response.headers.Set-Cookie}}
+
+### 39. Cambio de contrasena de otra
+# Esperado: 200 con Set-Cookie nuevo y debe_cambiar_password: false
+# @name cambioOtra
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginOtra.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "Provisoria2",
+  "password_nueva": "ClaveOtra22"
+}
+
+### 40. GET /eventos con la cookie nueva
+# Esperado: 200
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 41. GET /eventos con la cookie anterior al cambio (RN07)
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginOtra.response.headers.Set-Cookie}}
+
+# =============================================================================
+# F. Revocacion y autoproteccion (PDF C-07, C-08; RN04, RN05)
+# =============================================================================
+
+### 42. jefa revoca el ADMIN de otra
+# Esperado: 200 con revocada_en no nulo y vigente: false
+# psql: la fila sigue y se agrego el evento:
+#   SELECT rol, revocada_en IS NOT NULL FROM asignacion_rol WHERE usuario_id = <otra> AND rol = 'ADMIN';
+#   SELECT actor, accion FROM evento_seguridad ORDER BY id DESC LIMIT 1;
+#     -- jefa@personal.example.com | Revocación del rol ADMIN a otra@personal.example.com
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles/ADMIN
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 43. Misma cookie de otra despues de perder ADMIN (RN04)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 44. GET /auth/yo con la misma cookie
+# Esperado: 200 con roles_vigentes: [] y roles_token: ["ADMIN"]
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 45. GET roles de otra
+# Esperado: 200 con roles_vigentes: [] y una asignacion ADMIN con revocada_en no nulo y vigente: false
+# @no-cookie-jar
+GET {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 46. Revocar otra vez el ADMIN de otra
+# Esperado: 404 {"detail": "El usuario no tiene el rol ADMIN vigente"}; revocada_en conserva el valor del caso 42
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles/ADMIN
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 47. jefa intenta revocarse su propio ADMIN
+# Esperado: 409 {"detail": "Un administrador no puede revocarse su propio rol ADMIN"}
+# psql: su ADMIN sigue abierto y no hay evento nuevo.
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{registroJefa.response.body.$.id}}/roles/ADMIN
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 48. Rol inexistente en la ruta
+# Esperado: 422
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles/SUPERVISOR
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 49. Revocar un rol que nuevo nunca tuvo
+# Esperado: 404 {"detail": "El usuario no tiene el rol CLIENTE vigente"}
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles/CLIENTE
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 50. Revocar en un usuario inexistente
+# Esperado: 404 {"detail": "El usuario no existe"}
+# @no-cookie-jar
+DELETE {{base}}/usuarios/999999/roles/MECANICO
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 51. Revocar el MECANICO de nuevo
+# Esperado: 200 con vigente: false
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles/MECANICO
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 52. jefa se revoca otro rol propio (CLIENTE)
+# Esperado: 200 con vigente: false
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{registroJefa.response.body.$.id}}/roles/CLIENTE
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# G. Reasignar y vencer (PDF C-07)
+# =============================================================================
+
+### 53. Reasignar ADMIN a otra (la revocada sigue)
+# Esperado: 201 con una fila nueva (id distinto del caso 31), vigente: true
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "ADMIN"
+}
+
+### 54. GET /eventos con la misma cookie de otra
+# Esperado: 200 (la asignacion nueva rige sin volver a iniciar sesion)
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 55. GET /eventos con el ADMIN de otra vencido
+# Antes (psql): vencer la fila abierta de ADMIN de otra:
+#   UPDATE asignacion_rol SET vence_en = now() - interval '1 second'
+#     WHERE usuario_id = <otra> AND rol = 'ADMIN' AND revocada_en IS NULL;
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 56. Revocar un ADMIN vencido
+# Esperado: 404 {"detail": "El usuario no tiene el rol ADMIN vigente"}
+# psql: la fila vencida sigue con revocada_en NULL.
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles/ADMIN
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 57. Reasignar el ADMIN vencido
+# Esperado: 201
+# psql: la fila vencida quedo cerrada y hay una sola abierta:
+#   SELECT id, desde, vence_en, revocada_en FROM asignacion_rol
+#     WHERE usuario_id = <otra> AND rol = 'ADMIN' ORDER BY id;
+#     -- 3 filas: revocada (caso 42), vencida con revocada_en = desde de la nueva, nueva abierta
+#   SELECT accion FROM evento_seguridad ORDER BY id DESC LIMIT 1;
+#     -- Asignación del rol ADMIN a otra@personal.example.com (reemplaza una asignación vencida)
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "ADMIN"
+}
+
+### 58. GET /eventos con la misma cookie de otra
+# Esperado: 200
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 59. GET roles de otra: historial completo
+# Esperado: 200 con roles_vigentes: ["ADMIN"] y 3 asignaciones ADMIN en orden de desde:
+#   revocada (vigente false), vencida y cerrada (vigente false), nueva (vigente true)
+# @no-cookie-jar
+GET {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# H. RN05: siempre un ADMIN vigente sin vencimiento (S-09, alternativa B)
+#    Al empezar, jefa y otra tienen ADMIN vigente sin vencimiento (caso 57).
+# =============================================================================
+
+### 60. jefa revoca el ADMIN de otra (queda jefa sin vencimiento)
+# Esperado: 200 con vigente: false
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles/ADMIN
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 61. Asignar ADMIN CON vencimiento a otra (permitido, sin regla extra)
+# Esperado: 201 con vence_en: "2099-01-01T00:00:00Z" y vigente: true
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaOtra.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "ADMIN",
+  "vence_en": "2099-01-01T00:00:00Z"
+}
+
+### 62. otra (ADMIN con vencimiento) revoca al unico ADMIN sin vencimiento
+# jefa es el unico ADMIN sin vencimiento; el ADMIN de otra vence y no cuenta.
+# Esperado: 409 {"detail": "No se puede revocar: el sistema quedaría sin administradores vigentes sin vencimiento"}
+# psql: el ADMIN de jefa sigue abierto y sin vence_en; no hay evento nuevo.
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{registroJefa.response.body.$.id}}/roles/ADMIN
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+### 63. jefa asigna ADMIN sin vencimiento a nuevo (segundo ADMIN permanente)
+# Esperado: 201
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "ADMIN"
+}
+
+### 64. otra (con vencimiento) revoca el ADMIN de nuevo: queda jefa sin vencimiento
+# Esperado: 200 con vigente: false
+# psql: SELECT accion FROM evento_seguridad ORDER BY id DESC LIMIT 1;
+#   -- Revocación del rol ADMIN a nuevo@personal.example.com
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles/ADMIN
+Cookie: {{cambioOtra.response.headers.Set-Cookie}}
+
+# =============================================================================
+# I. Historial (spec security-events)
+# =============================================================================
+
+### 65. GET /eventos?page=1&size=5
+# Esperado: 200 con 5 items en id descendente, total = SELECT count(*) FROM evento_seguridad,
+#   pages = ceil(total / 5), page 1, size 5; cada item {id, cuando, actor, accion}
+# @no-cookie-jar
+GET {{base}}/eventos?page=1&size=5
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 66. size=500
+# Esperado: 422
+# @no-cookie-jar
+GET {{base}}/eventos?size=500
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 67. page=0
+# Esperado: 422
+# @no-cookie-jar
+GET {{base}}/eventos?page=0
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 68. page=9999
+# Esperado: 422 {"detail": "La página 9999 no existe: hay N"}
+# @no-cookie-jar
+GET {{base}}/eventos?page=9999
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 69. Una linea de evento por operacion aceptada, ninguna por rechazo
+# Esperado (psql): 17 lineas, en este orden:
+#   SELECT actor, accion FROM evento_seguridad WHERE actor LIKE '%@personal.example.com' ORDER BY id;
+#     jefa      Auto-registro de cliente
+#     cliente   Auto-registro de cliente
+#     jefa      Alta de personal: nuevo@personal.example.com
+#     jefa      Alta de personal: otra@personal.example.com
+#     jefa      Asignación del rol MECANICO a nuevo@personal.example.com                 (caso 21)
+#     jefa      Asignación del rol RECEPCION a nuevo@personal.example.com hasta 2099-01-01T03:00:00Z  (30)
+#     jefa      Asignación del rol ADMIN a otra@personal.example.com                      (31)
+#     otra      Cambio de contraseña                                                      (39)
+#     jefa      Revocación del rol ADMIN a otra@personal.example.com                      (42)
+#     jefa      Revocación del rol MECANICO a nuevo@personal.example.com                  (51)
+#     jefa      Revocación del rol CLIENTE a jefa@personal.example.com                    (52)
+#     jefa      Asignación del rol ADMIN a otra@personal.example.com                      (53)
+#     jefa      Asignación del rol ADMIN a otra@personal.example.com (reemplaza una asignación vencida)  (57)
+#     jefa      Revocación del rol ADMIN a otra@personal.example.com                      (60)
+#     jefa      Asignación del rol ADMIN a otra@personal.example.com hasta 2099-01-01T00:00:00Z  (61)
+#     jefa      Asignación del rol ADMIN a nuevo@personal.example.com                      (63)
+#     otra      Revocación del rol ADMIN a nuevo@personal.example.com                      (64)
+#   2 auto-registros, 2 altas, 7 asignaciones, 5 revocaciones y 1 cambio de contrasena = 17.
+#   Ninguna por los rechazos (403, 404, 409, 422), tampoco por el 409 del caso 62.
+#   (El actor es siempre el correo completo @personal.example.com; arriba va abreviado.)
+# Esta peticion solo confirma que el historial sigue accesible:
+# Esperado: 200
+# @no-cookie-jar
+GET {{base}}/eventos?size=1
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 70. vence_en que se sale del rango al pasar a UTC (hallazgo del FINAL_DIFF)
+# Esperado: 422 sobre ["body", "vence_en"] (NO 500)
+# @no-cookie-jar
+POST {{base}}/usuarios/{{altaNuevo.response.body.$.id}}/roles
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "9999-12-31T23:00:00-14:00"
+}
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP; script temporal no versionado)
+# =============================================================================
+# - Revocaciones cruzadas simultaneas entre los dos unicos ADMIN sin vencimiento (RN05):
+#   exactamente un 200 y un 409, queda un ADMIN sin vencimiento; 20 repeticiones sin forzar.
+# - Asignaciones simultaneas del mismo rol (201 + 409, nunca 500, una fila abierta); dos
+#   reasignaciones simultaneas del mismo rol vencido; altas simultaneas del mismo correo.
+# - Atomicidad con el evento: si la escritura del evento falla, no queda usuario, asignacion
+#   ni cierre de la fila vencida.
+# - bcrypt del alta fuera de la transaccion (ninguna sentencia entre inicio y fin del hash).
+# - /openapi.json sin password_hash ni password_provisoria en respuestas, y sin GET /usuarios.
+# - Conteo de consultas de GET /eventos autorizado (2 SELECT de autorizacion + conteo + pagina).
