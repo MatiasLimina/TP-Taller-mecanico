@@ -1,8 +1,9 @@
 """Unit of Work del módulo usuarios y anotador de intentos de acceso (C-07).
 
-`UsuariosUoW` agrupa los repositorios que usan registro y login con la MISMA sesión de la
-petición. La ficha de cliente y el evento de seguridad se escriben con `BaseRepository`
-(alcanza con `add()`), así no se adelanta `app/modules/clientes/repository.py` (C-10).
+`UsuariosUoW` agrupa los repositorios que usan registro, login, personal y roles con la MISMA
+sesión de la petición. La ficha de cliente se escribe con `BaseRepository` (alcanza con
+`add()`), así no se adelanta `app/modules/clientes/repository.py` (C-10); los eventos de
+seguridad tienen su repositorio (C-09) porque además se listan.
 """
 
 from typing import Annotated
@@ -15,9 +16,10 @@ from app.core.database import SessionDep
 from app.core.repository import BaseRepository
 from app.core.unit_of_work import UnitOfWork
 from app.modules.clientes.models import Cliente
-from app.modules.usuarios.models import EventoSeguridad, IntentoAcceso
+from app.modules.usuarios.models import IntentoAcceso
 from app.modules.usuarios.repository import (
     AsignacionRolRepository,
+    EventoSeguridadRepository,
     IntentoAccesoRepository,
     UsuarioRepository,
 )
@@ -30,7 +32,7 @@ class UsuariosUoW(UnitOfWork):
         self.asignaciones = AsignacionRolRepository(session)
         self.intentos = IntentoAccesoRepository(session)  # sólo lectura del conteo
         self.clientes = BaseRepository(session, Cliente)
-        self.eventos = BaseRepository(session, EventoSeguridad)
+        self.eventos = EventoSeguridadRepository(session)
 
 
 def get_usuarios_uow(session: SessionDep) -> UsuariosUoW:

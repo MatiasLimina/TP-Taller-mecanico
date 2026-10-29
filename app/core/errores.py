@@ -2,9 +2,9 @@
 
 Convención (la heredan todos los módulos):
 
-- Los SERVICIOS lanzan `NoAutenticado` (401), `NoEncontrado` (404), `Conflicto` (409),
-  `EntradaInvalida` (422) o `DemasiadosIntentos` (429) con un mensaje propio en español;
-  no conocen HTTP. Un manejador global los traduce a `{"detail": mensaje}`.
+- Los SERVICIOS lanzan `NoAutenticado` (401), `SinPermiso` (403), `NoEncontrado` (404),
+  `Conflicto` (409), `EntradaInvalida` (422) o `DemasiadosIntentos` (429) con un mensaje
+  propio en español; no conocen HTTP. Un manejador global los traduce a `{"detail": mensaje}`.
   `DemasiadosIntentos(mensaje, retry_after)` agrega el encabezado `Retry-After` (segundos).
 - Un error de integridad específico se traduce en el servicio, FUERA del bloque del Unit of
   Work, con `restriccion_violada(exc)` (requiere restricciones con nombre estable, C-03).
@@ -45,6 +45,12 @@ class ErrorDeAplicacion(Exception):
 
 class NoAutenticado(ErrorDeAplicacion):
     status_code = 401
+
+
+class SinPermiso(ErrorDeAplicacion):
+    """Sesión válida pero sin derecho a la operación (rol faltante o cambio de contraseña pendiente)."""
+
+    status_code = 403
 
 
 class NoEncontrado(ErrorDeAplicacion):
