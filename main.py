@@ -11,6 +11,7 @@ from app.core.dependencies import exigir_password_al_dia
 from app.core.errores import registrar_manejadores
 from app.core.security import crear_hash_ficticio
 from app.modules.health.router import router as health_router
+from app.modules.repuestos.router import router_admin_repuestos, router_catalogo
 from app.modules.usuarios.router import router as auth_router
 from app.modules.usuarios.router import router_eventos, router_personal
 
@@ -42,10 +43,13 @@ rutas_abiertas.include_router(auth_router)
 # Cada módulo incluye sus routers con `rutas_protegidas.include_router(...)` ANTES de
 # `app.include_router(rutas_protegidas)`: `include_router` copia las rutas en ese momento y lo
 # que se agregue después no queda montado. C-09: personal, roles de un usuario y eventos
-# (sólo ADMIN); C-10+ suman los suyos.
+# (sólo ADMIN); C-11: catálogo de repuestos (lectura: ADMIN, RECEPCION y MECANICO; escritura: sólo
+# ADMIN); C-10 y los siguientes suman los suyos.
 rutas_protegidas = APIRouter(dependencies=[Depends(exigir_password_al_dia)])
 rutas_protegidas.include_router(router_personal)
 rutas_protegidas.include_router(router_eventos)
+rutas_protegidas.include_router(router_catalogo)
+rutas_protegidas.include_router(router_admin_repuestos)
 
 app.include_router(rutas_abiertas)
 app.include_router(rutas_protegidas)

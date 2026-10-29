@@ -365,6 +365,7 @@ Todos los supuestos fueron **confirmados por el usuario el 2026-10-29**, cada un
 - En el `async with uow` de terminar: bloquear primero la orden (`FOR UPDATE`), validar permiso (403) y estado (409), y luego `await aplicar_movimientos_stock(uow, [MovimientoPedido(i.repuesto_id, -i.cantidad, f"Orden #{orden.id} terminada", orden_id=orden.id) for i in items], usuario_id=actual.id, incluir_bajas=True)`. No capturar `StockInsuficiente` dentro del bloque: el UoW revierte stock, movimientos y cualquier cambio de estado (RN13, PDF C-11). `BackgroundTasks` se agenda después del bloque.
 - PDF C-11 (orden #2: 4 bujías con stock 2) responde 409 `Stock insuficiente para el repuesto <código de la bujía>: hay 2 y se necesitan 4`.
 - Nunca `repuesto.stock = …`, `uow.repuestos.update(…, {"stock": …})` ni `MovimientoStock(...)` fuera del punto único (REPARTO §9).
+- El «hay N» del 409 sale de `leer_stock`, una lectura aparte del `UPDATE` fallido: con concurrencia puede mostrar el stock que dejó otra transacción, o volverse 404 si el repuesto se dio de baja en el medio. No afecta el rollback. Si C-14 necesita el número exacto, `leer_stock` puede leer con `FOR SHARE`.
 
 **C-06 (seed — Lauti)**
 - El seed escribe filas directamente (no pasa por servicios): su stock inicial debe dejar `stock = SUM(cantidad)` con `motivo` «Stock inicial» (= `MOTIVO_STOCK_INICIAL`). Opcional: usar `aplicar_movimientos_stock` con un `RepuestosUoW` sobre su sesión para no duplicar la regla.
