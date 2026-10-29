@@ -58,7 +58,7 @@ GATE 1: C-02 ✓
 
 GATE 2: C-03 ✓                          ← FORK
   → C-04 append-only-trigger-migration  [hecho]
-  → C-07 auth-registro-login            [Matías — si C-05 ✓]
+  → C-07 auth-registro-login            [hecho]
   → C-06 seed-script                    [Lautaro — si C-04 ✓ y C-05 ✓]
   → C-16 (sólo casos .http por adelantado) [Nicolás — desde la matriz de 03_actores_y_roles.md]
 
@@ -221,6 +221,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Clientes: Laura (con usuario, 2 vehículos), Jorge (sin usuario, 1 vehículo); repuestos con movimiento "Stock inicial"; órdenes #1 PENDIENTE y #2 EN_REPARACION (4 bujías con stock 2, a propósito); historial de precio 8000 → 8500; evento de seguridad actor `SISTEMA`
   - Hashes generados con `security.py`
   - Correos cargados en minúsculas: `seed.py` verifica al cargar y falla (o los normaliza) si alguno tiene mayúsculas o espacios; la API los normaliza y la base no lo impone, porque la consigna admite sólo dos migraciones (S-01 de C-07)
+  - Correos con dominio válido para `EmailStr` (p. ej. `@taller.com` o `@example.com`): el login los valida y rechaza dominios de uso especial como `.local`, `.test` o `.localhost` con 422, así que un usuario del seed con esos dominios nunca podría iniciar sesión (revisión de C-07)
 - **Dependencias**: `C-04, C-05`
 - **Governance**: MEDIO (datos de prueba; credenciales ficticias, nunca reales)
 - **Leer antes**:
@@ -230,7 +231,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - `knowledge-base/06_funcionalidades.md` §Épica 8 (US-070)
 
 ### [C-07] `auth-registro-login`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `usuarios` (models/schemas/repository/unit_of_work/service/router) con `AsignacionRol`, `IntentoAcceso`, `EventoSeguridad`
   - `POST /auth/registro`: hash antes de abrir la transacción; un UoW crea `usuario` + `asignacion_rol(CLIENTE)` + `cliente` + `evento_seguridad`; correo/documento repetido → 409 sin filas sueltas; documento de cliente existente → 409 (RN02). Casos PDF C02

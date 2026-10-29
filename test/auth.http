@@ -1,0 +1,622 @@
+# =============================================================================
+# test/auth.http -- Casos de C-07 auth-registro-login (C-02, C-03, C-04, C-05)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada seccion).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin usuarios):
+#
+#   -- limpia SOLO las filas de este archivo (todos sus correos terminan en @example.com):
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@example.com';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@example.com');
+#   DELETE FROM cliente WHERE documento = '20111222' OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@example.com';
+#   -- ficha de cliente cargada por el taller, SIN usuario (caso "documento de cliente
+#   -- sin usuario"; con el seed de C-06 se usa un documento del seed):
+#   INSERT INTO cliente (nombre, documento, telefono)
+#     VALUES ('Jorge Sin Usuario', '20111222', '1155550000');
+#
+# Los correos y documentos de este archivo son unicos: el archivo es de una sola
+# pasada sobre ese estado. La contrasena valida de todos los usuarios es ClaveSegura1.
+# (Una base de dev con un usuario ya registrado con esos correos o documentos da 409 donde
+# se espera 201.)
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# C-02 -- Registro
+# =============================================================================
+
+### 1. Registro exitoso (S-04: sin sesion, sin cookie)
+# Esperado: 201 con {id, email, nombre, cliente:{id, nombre, documento, telefono}};
+#   email "ana@example.com"; SIN password_hash, SIN password, SIN token y SIN Set-Cookie.
+# psql:
+#   SELECT id, email, nombre, activo, debe_cambiar_password, left(password_hash, 7)
+#     FROM usuario WHERE email = 'ana@example.com';
+#     -- activo=t, debe_cambiar_password=f, hash empieza con $2b$12$
+#   SELECT rol, vence_en, revocada_en FROM asignacion_rol
+#     WHERE usuario_id = (SELECT id FROM usuario WHERE email = 'ana@example.com');
+#     -- una fila CLIENTE, vence_en y revocada_en nulos
+#   SELECT c.nombre, c.documento, c.telefono, c.usuario_id = u.id AS vinculada
+#     FROM cliente c JOIN usuario u ON u.email = 'ana@example.com' WHERE c.documento = '30123456';
+#   SELECT actor, accion FROM evento_seguridad WHERE actor = 'ana@example.com';
+#     -- ('ana@example.com', 'Auto-registro de cliente')
+# @name registro_ok
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "ana@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Ana Perez",
+  "documento": "30123456",
+  "telefono": "1155551111"
+}
+
+### 2. Correo repetido (documento nuevo)
+# Esperado: 409 {"detail": "El correo ya está registrado"} (sin texto de la base).
+# psql: no hay filas nuevas -- SELECT count(*) FROM cliente WHERE documento = '50000001'; -- 0
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "ana@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Otra Ana",
+  "documento": "50000001",
+  "telefono": "1155552222"
+}
+
+### 3. Mismo correo con otras mayusculas y espacios (S-01: correo normalizado)
+# Esperado: 409 {"detail": "El correo ya está registrado"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": " Ana@Example.COM ",
+  "password": "ClaveSegura1",
+  "nombre": "Otra Ana",
+  "documento": "50000001",
+  "telefono": "1155552222"
+}
+
+### 4. Re-registro del documento 50000001 con otro correo
+# Prueba que el 409 de los casos 2 y 3 no dejo una ficha suelta.
+# Esperado: 201 (cliente.documento "50000001")
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "carla@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Carla Gomez",
+  "documento": "50000001",
+  "telefono": "1155553333"
+}
+
+### 5. Documento repetido de un cliente con usuario (Ana)
+# Esperado: 409 {"detail": "El documento ya pertenece a un cliente del taller"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "dario@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Dario Ruiz",
+  "documento": "30123456",
+  "telefono": "1155554444"
+}
+
+### 6. Documento de un cliente del taller SIN usuario (Jorge, RN02)
+# Esperado: 409 {"detail": "El documento ya pertenece a un cliente del taller"}
+# psql: la ficha de Jorge conserva usuario_id nulo y sus datos --
+#   SELECT nombre, telefono, usuario_id FROM cliente WHERE documento = '20111222';
+#     -- ('Jorge Sin Usuario', '1155550000', NULL)
+# psql: no quedo usuario suelto --
+#   SELECT count(*) FROM usuario WHERE email = 'dario@example.com'; -- 0
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "dario@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Dario Ruiz",
+  "documento": "20111222",
+  "telefono": "1155554444"
+}
+
+### 7. Re-registro de dario@example.com con documento nuevo
+# Prueba que los 409 de los casos 5 y 6 no dejaron un usuario suelto.
+# Esperado: 201
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "dario@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Dario Ruiz",
+  "documento": "50000002",
+  "telefono": "1155554444"
+}
+
+### 8. Documento repetido que solo difiere en espacios (S-03)
+# Esperado: 409 {"detail": "El documento ya pertenece a un cliente del taller"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "eva@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Eva Luna",
+  "documento": " 30123456 ",
+  "telefono": "1155555555"
+}
+
+### 9. Re-registro de eva@example.com con documento nuevo (sin usuario suelto)
+# Esperado: 201
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "eva@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Eva Luna",
+  "documento": "50000003",
+  "telefono": "1155555555"
+}
+
+# =============================================================================
+# Contratos del registro
+# =============================================================================
+
+### 10. Espacios alrededor recortados (nombre y documento)
+# Esperado: 201 con cliente.documento "40123456" y nombre "Bruno Diaz" (sin espacios).
+# psql: SELECT '[' || documento || ']', '[' || nombre || ']' FROM cliente WHERE documento = '40123456';
+#   -- ('[40123456]', '[Bruno Diaz]')
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "bruno@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "  Bruno Diaz ",
+  "documento": " 40123456 ",
+  "telefono": " 1155556666 "
+}
+
+### 11. Campo reservado en el cuerpo (rol)
+# Esperado: 422 {"detail": [{"loc": ["body", "rol"], "type": "extra_forbidden", ...}]}
+#   sin el valor enviado. No se crea ninguna fila.
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x1@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "X Uno",
+  "documento": "70000001",
+  "telefono": "1100000001",
+  "rol": "ADMIN"
+}
+
+### 12. Campo reservado en el cuerpo (activo)
+# Esperado: 422 que nombra el campo "activo"
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x2@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "X Dos",
+  "documento": "70000002",
+  "telefono": "1100000002",
+  "activo": false
+}
+
+### 13. Contrasena de 80 bytes (40 caracteres n con tilde)
+# Esperado: 422 sobre ["body", "password"], sin el valor enviado y sin 500.
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x3@example.com",
+  "password": "ññññññññññññññññññññññññññññññññññññññññ",
+  "nombre": "X Tres",
+  "documento": "70000003",
+  "telefono": "1100000003"
+}
+
+### 14. Contrasena de exactamente 72 bytes (36 caracteres n con tilde)
+# Esperado: 201 (el contrato la acepta; es el limite de bcrypt)
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "frank@example.com",
+  "password": "ññññññññññññññññññññññññññññññññññññ",
+  "nombre": "Frank Tilde",
+  "documento": "60000001",
+  "telefono": "1155557777"
+}
+
+### 15. Contrasena de 7 caracteres (el minimo del registro es 8)
+# Esperado: 422 sobre ["body", "password"]
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x4@example.com",
+  "password": "Corta12",
+  "nombre": "X Cuatro",
+  "documento": "70000004",
+  "telefono": "1100000004"
+}
+
+### 16. Correo con formato invalido
+# Esperado: 422 sobre ["body", "email"]
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "no-es-un-correo",
+  "password": "ClaveSegura1",
+  "nombre": "X Cinco",
+  "documento": "70000005",
+  "telefono": "1100000005"
+}
+
+### 17. nombre solo con espacios
+# Esperado: 422 sobre ["body", "nombre"]
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x6@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "   ",
+  "documento": "70000006",
+  "telefono": "1100000006"
+}
+
+### 18. documento solo con espacios
+# Esperado: 422 sobre ["body", "documento"]
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x7@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "X Siete",
+  "documento": "   ",
+  "telefono": "1100000007"
+}
+
+### 19. telefono solo con espacios
+# Esperado: 422 sobre ["body", "telefono"]
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x8@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "X Ocho",
+  "documento": "70000008",
+  "telefono": "   "
+}
+
+### 20. documento de 21 caracteres
+# Esperado: 422 sobre ["body", "documento"] (no 500)
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "x9@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "X Nueve",
+  "documento": "123456789012345678901",
+  "telefono": "1100000009"
+}
+
+### Comprobacion tras los casos 11-13, 15-20: ninguno escribio nada
+# psql:
+#   SELECT count(*) FROM usuario WHERE email LIKE 'x_@example.com'; -- 0
+#   SELECT count(*) FROM cliente WHERE documento LIKE '7000000_';   -- 0
+
+# =============================================================================
+# C-03 -- Login exitoso
+# =============================================================================
+
+### 21. Login correcto
+# Esperado: 200 con el cuerpo EXACTO
+#   {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+#   (sin token ni otros campos) y
+#   Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+# psql: SELECT email, ip, exito FROM intento_acceso WHERE email = 'ana@example.com';
+#   -- una fila exito=t
+# @name login_ok
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ana@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 22. Login con el correo en mayusculas y con espacios (S-01)
+# Esperado: 200 igual que el caso 21 (el correo normalizado es el mismo usuario)
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": " ANA@example.com ",
+  "password": "ClaveSegura1"
+}
+
+### 23. La cuenta recien registrada inicia sesion (contrasena de 72 bytes)
+# Esperado: 200
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "frank@example.com",
+  "password": "ññññññññññññññññññññññññññññññññññññ"
+}
+
+# Cambio de contrasena pendiente / roles vigentes en el token: se verifican por script
+# (psql UPDATE usuario SET debe_cambiar_password = true; asignaciones revocada/vencida y
+# decodificar_token_acceso). Ver "Verificados por script" al pie.
+
+# =============================================================================
+# C-04 -- Credenciales rechazadas sin revelar la cuenta (RN09)
+# =============================================================================
+
+### 24. Contrasena incorrecta de un correo existente
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}, sin Set-Cookie
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carla@example.com",
+  "password": "ContrasenaEquivocada"
+}
+
+### 25. Correo inexistente
+# Esperado: 401 con cuerpo IDENTICO byte a byte al del caso 24, sin Set-Cookie
+# psql: SELECT email, exito FROM intento_acceso WHERE email = 'fantasma@example.com';
+#   -- una fila exito=f (el correo inexistente tambien se anota)
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "fantasma@example.com",
+  "password": "ContrasenaEquivocada"
+}
+
+### 26. Usuario inactivo con contrasena correcta
+# Antes (psql): UPDATE usuario SET activo = false WHERE email = 'dario@example.com';
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"} sin Set-Cookie
+# Despues (psql): UPDATE usuario SET activo = true WHERE email = 'dario@example.com';
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "dario@example.com",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# Contrato del login
+# =============================================================================
+
+### 27. Contrasena de 73 bytes (36 n con tilde + "a")
+# Esperado: 422 sobre ["body", "password"]; NO 401 ni 500; no agrega fila a intento_acceso.
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "tilde73@example.com",
+  "password": "ñññññññññññññññññññññññññññññññññññña"
+}
+
+### 28. Campo extra en el login
+# Esperado: 422 que nombra ["body", "recordarme"]
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ana@example.com",
+  "password": "ClaveSegura1",
+  "recordarme": true
+}
+
+### 29. Contrasena de 3 caracteres (el login no exige el minimo de 8)
+# Esperado: 401 (se verifica como cualquier otra), NUNCA 422
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "corto@example.com",
+  "password": "abc"
+}
+
+### 30. Contrasena vacia
+# Esperado: 422 sobre ["body", "password"]
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ana@example.com",
+  "password": ""
+}
+
+### 31. Correo con formato invalido en el login
+# Esperado: 422 sobre ["body", "email"]
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "no-es-un-correo",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# C-05 -- Limite de intentos fallidos por correo e IP (RN08)
+# Usa gina@example.com (registrada aqui) para poder probar la contrasena correcta.
+# =============================================================================
+
+### 32. Registrar a Gina (solo para el caso de limite)
+# Esperado: 201
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "gina@example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Gina Paz",
+  "documento": "80000001",
+  "telefono": "1155558888"
+}
+
+### 33. Fallo 1 de 5
+# Esperado: 401
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 34. Fallo 2 de 5
+# Esperado: 401
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 35. Fallo 3 de 5
+# Esperado: 401
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 36. Fallo 4 de 5
+# Esperado: 401
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 37. Fallo 5 de 5
+# Esperado: 401
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 38. Sexto intento: bloqueado
+# (correr dentro de los 60 segundos del fallo 1)
+# Esperado: 429 {"detail": "<mensaje propio>"} con el encabezado Retry-After: <entero entre 1 y 60>,
+#   respondido en pocos milisegundos (sin bcrypt).
+# psql: SELECT count(*), bool_or(exito) FROM intento_acceso WHERE email = 'gina@example.com';
+#   -- (5, f): exactamente cinco filas exito=f y ninguna por el 429
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "mala-mala" }
+
+### 39. Bloqueado aunque la contrasena sea correcta
+# Esperado: 429 con Retry-After y SIN Set-Cookie
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "ClaveSegura1" }
+
+### 40. Otro correo desde la misma IP no esta bloqueado
+# Esperado: 200
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "carla@example.com", "password": "ClaveSegura1" }
+
+### 41. Tras Retry-After (o tras el psql que corre cuando 61 s hacia atras) vuelve a verificar
+# Antes (psql): UPDATE intento_acceso SET cuando = cuando - interval '61 seconds'
+#                 WHERE email = 'gina@example.com';
+# Esperado: 200 (la contrasena correcta ya se verifica)
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{ "email": "gina@example.com", "password": "ClaveSegura1" }
+
+# =============================================================================
+# Logout
+# =============================================================================
+
+### 42. Logout con cookie de sesion
+# Esperado: 200 {"mensaje": "Sesión cerrada"} y
+#   Set-Cookie: access_token=""; HttpOnly; Max-Age=0; Path=/; SameSite=lax
+#   (Max-Age=0 y Path=/). No emite SQL.
+# @no-cookie-jar
+POST {{base}}/auth/logout
+Cookie: access_token=cualquier-valor
+
+### 43. Logout sin cookie (idempotente)
+# Esperado: la misma 200 y el mismo Set-Cookie de borrado
+# @no-cookie-jar
+POST {{base}}/auth/logout
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP o necesitan otra IP / tiempos)
+# =============================================================================
+# - Registros simultaneos con el mismo correo / mismo documento: 201 + 409, nunca 500 (tarea 5.2).
+# - "Hash antes de la transaccion" (tarea 5.3): inspeccion + SQL_ECHO.
+# - Login con debe_cambiar_password = true; roles vigentes del token (abierto/revocado/vencido).
+# - Mismo correo desde otra IP no bloqueado; 4 fallos + 1 exito + 4 fallos sigue verificando.
+# - Tiempos comparados de los tres caminos de fallo (existente/inexistente/inactivo).
+# - Contratos sobre el schema: correo de mas de 254 caracteres, nombre de 101, telefono de 31.
+# - Logout no emite SQL (SQL_ECHO=true).

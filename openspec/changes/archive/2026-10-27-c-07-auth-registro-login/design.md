@@ -233,7 +233,7 @@ La configuración global del usuario activa Strict TDD, pero el proyecto decidi�
 
 ## Risks / Trade-offs
 
-- [Carrera en el límite: varios logins simultáneos leen "4 fallos" y verifican todos] → aceptado; el semáforo de bcrypt acota el daño y la consigna no pide serializar (mismo criterio que DD-11). No se agrega bloqueo de filas.
+- [Carrera en el límite: varios logins simultáneos leen "4 fallos" y verifican todos] → aceptado (confirmado por el usuario, 2026-10-27, tras la revisión FINAL_DIFF). N peticiones paralelas del mismo correo + IP pasan el control antes de que alguna anote su intento, así que en una ventana de 60 s se pueden probar ~N contraseñas en vez de 5; el semáforo de bcrypt acota el ritmo. La concurrencia está fuera de alcance de la consigna (cap. 7, ver KB README) y el PDF prueba el límite con peticiones secuenciales (mismo criterio que DD-11). Alternativas descartadas: anotar el fallo antes de bcrypt (cambia el escenario de "exactamente cinco filas" y suma una escritura por login) y `pg_advisory_xact_lock` por correo + IP (retiene una conexión del pool durante bcrypt).
 - [Tiempo "parecido", no idéntico] → bcrypt (~300 ms) domina sobre las dos consultas y la inserción; los tres caminos de falla hacen el mismo trabajo. El éxito sí tarda distinto (consulta de roles), pero el éxito ya es distinguible.
 - [El 429 no se anota] → un atacante no puede extender el bloqueo, pero tampoco queda rastro de los reintentos bloqueados; aceptable porque los fallos que dispararon el bloqueo sí están.
 - [Bloqueo por correo + IP permite a un tercero bloquear a una víctima desde la misma IP (NAT compartido) por 60 s] → inherente a RN08; ventana corta.
