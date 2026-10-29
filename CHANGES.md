@@ -43,7 +43,7 @@ C-07 auth-registro-login
                ├── C-14 ordenes-transiciones   (C-13 + C-12)
                └── C-15 ordenes-lecturas-sin-n-plus-1
 
-C-16 verificacion-http-readme  (todos los anteriores)
+C-16 verificacion-http-readme  (C-06 + C-09 + C-14 + C-15)
 ```
 
 ### Paralelismo por fase
@@ -59,27 +59,27 @@ GATE 1: C-02 ✓
 GATE 2: C-03 ✓                          ← FORK
   → C-04 append-only-trigger-migration  [hecho]
   → C-07 auth-registro-login            [hecho]
-  → C-06 seed-script                    [Lautaro — si C-04 ✓ y C-05 ✓]
-  → C-16 (sólo casos .http por adelantado) [Nicolás — desde la matriz de 03_actores_y_roles.md]
+  → C-06 seed-script                    [propuesto — si C-04 ✓ y C-05 ✓]
+  → C-16 (sólo casos .http por adelantado, desde la matriz de 03_actores_y_roles.md)
 
 GATE 3: C-07 ✓
   → C-08 auth-session-guards            [hecho]
 
 GATE 4: C-08 ✓                          ← FORK
-  → C-09 roles-personal-eventos         [Matías]
-  → C-10 clientes-vehiculos             [Lautaro — propose de Nicolás]
-  → C-11 repuestos-catalogo             [Matías — propose de Nicolás]
+  → C-09 roles-personal-eventos         [hecho]
+  → C-10 clientes-vehiculos
+  → C-11 repuestos-catalogo
 
 GATE 5: C-11 ✓
-  → C-12 repuestos-stock-precios        [Matías — propose de Nicolás]
-  → C-13 ordenes-alta-estados           [Nicolás — si C-10 ✓ además]
+  → C-12 repuestos-stock-precios
+  → C-13 ordenes-alta-estados           [si C-10 ✓ además]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
-  → C-14 ordenes-transiciones           [Nicolás — revisión de Matías]
-  → C-15 ordenes-lecturas-sin-n-plus-1  [Lautaro — propose de Nicolás]
+  → C-14 ordenes-transiciones
+  → C-15 ordenes-lecturas-sin-n-plus-1
 
-GATE 7: C-09, C-14, C-15, C-06 ✓
-  → C-16 verificacion-http-readme       [Lautaro — cierre; cada uno aporta los casos de su módulo]
+GATE 7: C-06, C-09, C-14, C-15 ✓
+  → C-16 verificacion-http-readme
 ```
 
 ### Camino crítico (9 changes — mínimo irreducible)
@@ -90,34 +90,9 @@ GATE 7: C-09, C-14, C-15, C-06 ✓
 
 ### Reparto del equipo
 
-El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herramientas de IA de plan pago (Claude) y se ocupan del diseño y de lo crítico. Lautaro trabaja con GitHub Copilot (plan de estudiantes), Gemini y los modelos gratuitos de OpenCode, e implementa changes ya especificados.
+Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregables de C-16) vive **sólo** en [docs/REPARTO_DE_TAREAS.md](docs/REPARTO_DE_TAREAS.md). Acá cada change tiene un campo **Responsable** que tiene que coincidir con la tabla §3 de ese documento; si el reparto cambia, se editan los dos en el mismo commit.
 
-> **Reparto actualizado (2026-10-28):** con C-01…C-05, C-07 y C-08 archivados y C-09 en curso, Nicolás pasa a hacer los `propose` de C-10 en adelante y el `apply` de las órdenes (C-13, C-14). Matías toma repuestos (C-11, C-12) y Lautaro el cierre (C-16).
-
-| Quién | Rol | Tareas |
-|-------|-----|--------|
-| **Matías** | Partes críticas, revisión y cierre | `propose` de C-06…C-09; `apply` de C-07, C-08, C-09 (CRITICO), C-11 repuestos-catalogo y C-12 repuestos-stock-precios; revisión de todos los PR (en especial los propose y applies de Nicolás); `archive` |
-| **Nicolás** | Diseño y órdenes | `propose` de C-10…C-16; `apply` de C-13 ordenes-alta-estados y C-14 ordenes-transiciones (con revisión de Matías); casos `.http` de C-16 por adelantado |
-| **Lautaro** | Implementación y verificación | `apply` de C-06 seed-script, C-10 clientes-vehiculos, C-15 ordenes-lecturas-sin-n-plus-1 y C-16 verificacion-http-readme |
-
-| Paso | Matías | Lautaro | Nicolás |
-|------|--------|---------|---------|
-| 1-4 | C-01 a C-05 ✓ | — | — |
-| 5 | C-07 auth-registro-login ✓ | — | Casos `.http` de C-16 por adelantado (matriz endpoint↔rol) |
-| 6 | C-08 auth-session-guards ✓ | — | (cont. casos `.http`) |
-| 7 | C-09 roles-personal-eventos · `propose` de C-06 | C-06 seed-script | `propose` de C-10, C-11, C-12 |
-| 8 | C-11 repuestos-catalogo | C-10 clientes-vehiculos | `propose` de C-13, C-14, C-15, C-16 |
-| 9 | C-12 repuestos-stock-precios | (cont. C-10) | C-13 ordenes-alta-estados |
-| 10 | Revisión de C-13 | C-15 ordenes-lecturas-sin-n-plus-1 | C-14 ordenes-transiciones |
-| 11 | Revisión final + `archive` | C-16 (cierre: README + ciclo de migraciones) | Casos `.http` de órdenes |
-
-> **Cuello de botella:** los `propose` de C-10 y C-11 (Nicolás, paso 7). Lautaro y Matías no pueden arrancar C-10/C-11 hasta tenerlos. Si Nicolás no tiene todavía el entorno listo (CLAUDE.md global con OPSX, engram y `.atl/skill-registry.md`, que no se versionan), Matías hace esos dos `propose` para no frenar al resto.
->
-> **Revisión cruzada:** cuando Nicolás hace el `propose` y el `apply` del mismo change (C-13, C-14), Matías revisa los dos antes del merge, porque si no nadie más mira ese diseño.
->
-> **Convención para los `tasks.md`:** los changes que implementa Lautaro (C-06, C-10, C-15, C-16) los hacen modelos más chicos, así que cada tarea indica el archivo exacto, la firma de la función o del endpoint, la regla dura que aplica y el caso `.http` que tiene que pasar. Una tarea ambigua se reescribe antes de asignarla, no se deja a criterio del modelo. Se mantiene la misma convención en todos los changes, para que cualquiera pueda tomar cualquiera.
->
-> Los pasos son orientativos; lo que manda son las dependencias.
+> **Convención para los `tasks.md`:** los changes que implementa Lauti (C-06, C-10, C-15, C-16) los hacen modelos más chicos, así que cada tarea indica el archivo exacto, la firma de la función o del endpoint, la regla dura que aplica y el caso `.http` que tiene que pasar. Una tarea ambigua se reescribe antes de asignarla, no se deja a criterio del modelo. Se mantiene la misma convención en todos los changes, para que cualquiera pueda tomar cualquiera.
 
 ---
 
@@ -136,6 +111,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Verificación: la app levanta con `uvicorn main:app` y `/health/*` responde
 - **Dependencias**: ninguna
 - **Governance**: MEDIO (maneja secretos/configuración; condición bloqueante de la corrección)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/01_vision_y_objetivos.md` §Métricas de éxito
   - `knowledge-base/06_funcionalidades.md` §Épica 1 (US-001, US-002)
@@ -158,6 +134,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Contrato de DTOs: base con `extra="forbid"`, ninguna respuesta incluye `password_hash`
 - **Dependencias**: `C-01`
 - **Governance**: ALTO (cimiento que todos los módulos heredan; pesa 20 % de la nota)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/08_arquitectura_propuesta.md` §Patrones aplicados
   - `knowledge-base/05_reglas_de_negocio.md` §Reglas globales de contrato, RN18
@@ -175,6 +152,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Verificación: `alembic upgrade head` sobre base vacía crea el esquema
 - **Dependencias**: `C-02`
 - **Governance**: CRITICO (modelos core que todo lo demás referencia)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/04_modelo_de_datos.md` (completo: ERD, entidades, decisiones de modelado)
   - `knowledge-base/05_reglas_de_negocio.md` §Identidad y unicidad, RN16, RN19
@@ -189,6 +167,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Verificación del ciclo `upgrade head` → `downgrade base` → `upgrade head`
 - **Dependencias**: `C-03`
 - **Governance**: ALTO (integridad en base; RN15)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/05_reglas_de_negocio.md` RN15
   - `knowledge-base/06_funcionalidades.md` §Épica 7 (US-060)
@@ -207,6 +186,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Hash ficticio calculado una sola vez en el lifespan → `app.state` (anti-enumeración, RN09)
 - **Dependencias**: `C-01`
 - **Governance**: CRITICO (auth)
+- **Responsable**: `propose` Lauti · `apply` Lauti
 - **Leer antes**:
   - `knowledge-base/08_arquitectura_propuesta.md` §Seguridad
   - `knowledge-base/05_reglas_de_negocio.md` RN07, RN09
@@ -225,6 +205,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - **Heredado de C-09** (S-09): el primer ADMIN del seed se crea **sin `vence_en`**; RN05 sólo cuenta ADMIN vigentes sin vencimiento, así que un ADMIN con vencimiento no protege al sistema de quedar sin administradores
 - **Dependencias**: `C-04, C-05`
 - **Governance**: MEDIO (datos de prueba; credenciales ficticias, nunca reales)
+- **Responsable**: `propose` Mati · `apply` Lauti
 - **Leer antes**:
   - `knowledge-base/04_modelo_de_datos.md` §Seed data inicial
   - `knowledge-base/10_preguntas_abiertas.md` IN-04
@@ -240,6 +221,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - `POST /auth/logout` (borra cookie)
 - **Dependencias**: `C-02, C-03, C-05`
 - **Governance**: CRITICO (auth)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/07_flujos_principales.md` §Flujo 1 (Login), §Flujo 3 (Registro)
   - `knowledge-base/05_reglas_de_negocio.md` RN01-RN03, RN08, RN09
@@ -255,6 +237,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Completar el caso PDF C03: 401 sin cookie y con `Authorization: Bearer` (diferido de C-07, S-06)
 - **Dependencias**: `C-07`
 - **Governance**: CRITICO (autorización 401 vs 403)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/07_flujos_principales.md` §Flujo 2, §Flujo 8
   - `knowledge-base/05_reglas_de_negocio.md` RN04, RN06, RN07, RN17
@@ -275,6 +258,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
     - El evento de cambio de contraseña ya lo escribe C-08 en el mismo UoW; acá sólo quedan las altas y los cambios de rol.
 - **Dependencias**: `C-08`
 - **Governance**: CRITICO (gestión de roles / auditoría)
+- **Responsable**: `propose` Mati · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 3 (US-020, US-021)
   - `knowledge-base/05_reglas_de_negocio.md` RN03, RN05
@@ -296,6 +280,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Tests `.http` del módulo (casos PDF C-xx de clientes/vehículos)
 - **Dependencias**: `C-08`
 - **Governance**: MEDIO
+- **Responsable**: `propose` Nico · `apply` Lauti
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 4 (US-030, US-031)
   - `knowledge-base/04_modelo_de_datos.md` §cliente, §vehiculo
@@ -311,6 +296,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Punto único de escritura de stock (RN14) definido en el servicio/repo de repuestos
 - **Dependencias**: `C-08`
 - **Governance**: MEDIO
+- **Responsable**: `propose` Nico · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 5 (US-040)
   - `knowledge-base/05_reglas_de_negocio.md` RN01, RN14, RN16, §Reglas globales de contrato
@@ -326,6 +312,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - `movimiento_stock.cantidad` con signo: entradas positivas, salidas negativas
 - **Dependencias**: `C-11`
 - **Governance**: ALTO (stock y precios; historiales de sólo agregado)
+- **Responsable**: `propose` Nico · `apply` Mati
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 5 (US-041, US-042)
   - `knowledge-base/07_flujos_principales.md` §Flujo 7
@@ -344,6 +331,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - `GET /estados-orden` (autenticado, por `posicion`)
 - **Dependencias**: `C-10, C-11`
 - **Governance**: ALTO (transacción multi-tabla, núcleo del dominio)
+- **Responsable**: `propose` Nico · `apply` Nico (Mati revisa propose y apply)
 - **Leer antes**:
   - `knowledge-base/07_flujos_principales.md` §Flujo 4
   - `knowledge-base/05_reglas_de_negocio.md` RN10, RN16, RN19
@@ -359,6 +347,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Servicio de transiciones guiado por `es_final` del catálogo
 - **Dependencias**: `C-13, C-12`
 - **Governance**: CRITICO (stock + permisos por dueño + atomicidad; núcleo del 20 % de Repos/UoW)
+- **Responsable**: `propose` Nico · `apply` Nico (Mati revisa propose y apply)
 - **Leer antes**:
   - `knowledge-base/07_flujos_principales.md` §Flujo 5, §Flujo 6
   - `knowledge-base/05_reglas_de_negocio.md` RN11, RN12, RN13, RN14, RN15
@@ -375,6 +364,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Sin carga perezosa ni llamadas bloqueantes en handlers (Ej.8)
 - **Dependencias**: `C-13`
 - **Governance**: MEDIO
+- **Responsable**: `propose` Nico · `apply` Lauti
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 6 (US-052)
   - `knowledge-base/08_arquitectura_propuesta.md` §Patrones (Eager loading)
@@ -394,6 +384,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
   - Chequeo de condición bloqueante: `alembic upgrade head` sobre base vacía, ciclo `upgrade/downgrade/upgrade`, sin credenciales reales en el repo (revisar `.gitignore`, `env.example`, `alembic.ini`)
 - **Dependencias**: `C-06, C-09, C-14, C-15`
 - **Governance**: BAJO
+- **Responsable**: `propose` Nico · `apply` Lauti (cierre); cada uno los `.http` de su módulo (ver REPARTO §6)
 - **Leer antes**:
   - `knowledge-base/06_funcionalidades.md` §Épica 8 (US-070)
   - `knowledge-base/03_actores_y_roles.md` §Matriz de permisos
@@ -414,4 +405,4 @@ El reparto separa **diseñar** de **ejecutar**. Matías y Nicolás tienen herram
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Primer change recomendado**: `C-01` (`foundation-setup`) → `/opsx:propose C-01-foundation-setup`
+**Estado (2026-10-29)**: C-01…C-05 y C-07…C-09 completados; C-06 propuesto; próximos `propose`: C-10 y C-11.
