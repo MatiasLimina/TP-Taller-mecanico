@@ -45,8 +45,8 @@ Organizadas por épica. Los criterios derivan de los ejercicios y casos de prueb
 
 ## Épica 5: Repuestos y stock
 ### US-040 — Catálogo de repuestos (Ej.3) — C-16
-- [ ] `GET /repuestos?q&page&size` con búsqueda por descripción con parámetros ligados (`' OR '1'='1` → lista vacía)
-- [ ] `POST` con `stock_inicial` (genera movimiento "Stock inicial"); `PATCH` sólo descripción y precio (stock → 422); `DELETE` lógico
+- [ ] `GET /repuestos?q&page&size` con búsqueda por descripción **o código** (C-11, S-08) con parámetros ligados (`' OR '1'='1` → lista vacía)
+- [ ] `POST` con `stock_inicial` (genera movimiento "Stock inicial"); `PATCH` sólo descripción y precio (stock → 422; si cambia el precio, línea de historial — RN20, C-11); `DELETE` lógico
 ### US-041 — Reposición y movimientos (RN14)
 - [ ] `POST /repuestos/{id}/reponer`; `GET /repuestos/{id}/movimientos`
 ### US-042 — Historial de precios (RN20) — C-18
