@@ -68,7 +68,7 @@ GATE 3: C-07 ✓
 GATE 4: C-08 ✓                          ← FORK
   → C-09 roles-personal-eventos         [hecho]
   → C-10 clientes-vehiculos
-  → C-11 repuestos-catalogo
+  → C-11 repuestos-catalogo            [hecho]
 
 GATE 5: C-11 ✓
   → C-12 repuestos-stock-precios
@@ -288,7 +288,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/03_actores_y_roles.md` §RBAC (rutas /clientes, /vehiculos)
 
 ### [C-11] `repuestos-catalogo`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `repuestos` (+ `SoftDeleteRepository`): `GET /repuestos?q&page&size` (ADMIN, RECEPCION, MECANICO; búsqueda con parámetros ligados, `' OR '1'='1` → lista vacía; paginado), `GET /repuestos/{id}`
   - `POST /repuestos` (ADMIN) con `stock_inicial` que genera `movimiento_stock` "Stock inicial" (cantidad positiva) en el mismo UoW; código vigente repetido → 409
@@ -308,7 +308,8 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 - **Scope**:
   - `POST /repuestos/{id}/reponer` (ADMIN): suma stock y registra `movimiento_stock` (cantidad positiva, motivo) en una transacción; cantidad inválida → 422
   - `GET /repuestos/{id}/movimientos` (ADMIN), `GET /repuestos/{id}/precios` (ADMIN, historial)
-  - Extensión del `PATCH` de C-11: si el precio cambia, agrega `historial_precio_repuesto` (anterior/nuevo) en el mismo UoW; PATCH sólo de descripción no crea línea; RECEPCION → 403 (RN20). Caso PDF C18
+  - Caso PDF C18: sólo la lectura de `/precios`. El historial en el `PATCH` (RN20) ya lo escribe C-11 (S-03): C-12 **no** toca `editar()`
+  - `reponer` usa el punto único `aplicar_movimientos_stock` de C-11 (ver «Notas para otros changes» en su design)
   - `movimiento_stock.cantidad` con signo: entradas positivas, salidas negativas
 - **Dependencias**: `C-11`
 - **Governance**: ALTO (stock y precios; historiales de sólo agregado)
@@ -405,4 +406,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-29)**: C-01…C-05 y C-07…C-09 completados; C-06 propuesto; próximos `propose`: C-10 y C-11.
+**Estado (2026-10-29)**: C-01…C-05, C-07…C-09 y C-11 completados; C-06 y C-10 propuestos; próximo: C-12.

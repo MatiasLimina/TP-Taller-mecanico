@@ -37,7 +37,7 @@ C-01 a C-09 ya están cerrados.
 | C-08 | auth-session-guards | CRITICO | Mati | Mati | ✓ |
 | C-09 | roles-personal-eventos | CRITICO | Mati | Mati | ✓ |
 | C-10 | clientes-vehiculos | MEDIO | Nico | **Lauti** | pendiente |
-| C-11 | repuestos-catalogo | MEDIO | Nico | **Mati** | pendiente |
+| C-11 | repuestos-catalogo | MEDIO | Nico | **Mati** | ✓ |
 | C-12 | repuestos-stock-precios | ALTO | Nico | **Mati** | pendiente |
 | C-13 | ordenes-alta-estados | ALTO | Nico | **Nico** (revisión de Mati) | pendiente |
 | C-14 | ordenes-transiciones | CRITICO | Nico | **Nico** (revisión de Mati) | pendiente |
@@ -46,7 +46,7 @@ C-01 a C-09 ya están cerrados.
 
 | Integrante | `propose` pendientes | `apply` pendientes | Governance máx. que implementa |
 |------------|----------------------|--------------------|-------------------------------|
-| **Mati** | — | C-11, C-12 | ALTO (ya hizo los CRITICO de auth) |
+| **Mati** | — | C-12 | ALTO (ya hizo los CRITICO de auth) |
 | **Nico** | C-10…C-16 | C-13, C-14 | CRITICO (C-14, con revisión de Mati) |
 | **Lauti** | — | C-06, C-10, C-15, C-16 | MEDIO |
 
