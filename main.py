@@ -1,12 +1,13 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 
 # Registra los 13 modelos (y resuelve sus relaciones) antes de la primera consulta.
 import app.modules.modelos
 from app.core.config import get_settings
 from app.core.database import create_engine, create_session_factory
+from app.core.dependencies import exigir_password_al_dia
 from app.core.errores import registrar_manejadores
 from app.core.security import crear_hash_ficticio
 from app.modules.health.router import router as health_router
@@ -30,9 +31,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Taller mecánico", lifespan=lifespan)
 registrar_manejadores(app)
 
-# Grupo de rutas públicas. C-08 agrega `rutas_protegidas` al lado.
+# Grupo de rutas públicas (salud, registro, login, logout, perfil y cambio de contraseña).
 rutas_abiertas = APIRouter()
 rutas_abiertas.include_router(health_router)
 rutas_abiertas.include_router(auth_router)
 
+# Grupo de rutas protegidas (RN06): exige sesión y, si el usuario debe cambiar la contraseña,
+# responde 403 en toda ruta del grupo. El control se monta UNA vez acá; no va en ningún router.
+# C-09+: incluir sus routers con `rutas_protegidas.include_router(...)` ANTES de
+# `app.include_router(rutas_protegidas)`: `include_router` copia las rutas en ese momento y lo
+# que se agregue después no queda montado.
+rutas_protegidas = APIRouter(dependencies=[Depends(exigir_password_al_dia)])
+
 app.include_router(rutas_abiertas)
+app.include_router(rutas_protegidas)

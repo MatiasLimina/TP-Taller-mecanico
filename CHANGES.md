@@ -63,7 +63,7 @@ GATE 2: C-03 ✓                          ← FORK
   → C-16 (sólo casos .http por adelantado) [Nicolás — desde la matriz de 03_actores_y_roles.md]
 
 GATE 3: C-07 ✓
-  → C-08 auth-session-guards            [Matías]
+  → C-08 auth-session-guards            [hecho]
 
 GATE 4: C-08 ✓                          ← FORK
   → C-09 roles-personal-eventos         [Matías]
@@ -241,7 +241,7 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
   - `knowledge-base/03_actores_y_roles.md` §Matriz RBAC (rutas /auth)
 
 ### [C-08] `auth-session-guards`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `app/core/dependencies.py`: `get_usuario_actual` (401: sin cookie, token inválido/vencido, usuario inexistente/inactivo, `iat` < `password_cambiada_en` comparado sin truncar), control de cambio obligatorio (403 si `debe_cambiar_password`), `requiere_rol(...)` consultando `asignacion_rol` vigente en base por petición (RN04)
   - `main.py`: dos grupos de rutas (abierto: `/auth/*` y salud; protegido: resto con control de cambio montado una vez, RN06)
@@ -260,9 +260,13 @@ El reparto separa **diseñar** de **ejecutar**. Matías tiene herramientas de IA
 - **Scope**:
   - `POST /usuarios` (ADMIN): alta de personal con contraseña provisoria y `debe_cambiar_password=true`; correo repetido → 409
   - `POST /usuarios/{id}/roles` (vencimiento opcional tz-aware y futuro, si no 422; duplicado vigente → 409; reasignar rol vencido cierra la fila previa y abre otra), `GET /usuarios/{id}/roles`, `DELETE /usuarios/{id}/roles/{rol}` (revoca sin borrar; ADMIN no se auto-revoca; nunca 0 admins → 409, RN05)
-  - `GET /eventos?page&size` (ADMIN, paginado); `evento_seguridad` registra altas, cambios de rol/contraseña
+  - `GET /eventos?page&size` (ADMIN, paginado); `evento_seguridad` registra altas y cambios de rol (el de contraseña ya lo escribe C-08)
   - Revocar un rol hace que la siguiente petición con la misma cookie dé 403
   - No existe `GET /usuarios` (IN-02)
+  - **Heredado de C-08** (S-05, S-06):
+    - Montar los routers de `/usuarios` y `/eventos` en `rutas_protegidas` **antes** de `app.include_router(rutas_protegidas)` en `main.py` y con `requiere_rol(Rol.ADMIN)`. Un router incluido después no hereda el control de cambio pendiente; `requiere_rol` igual lo exige.
+    - El grupo protegido estaba vacío en C-08: agregar al `.http` la evidencia del 403 por cambio pendiente y del 403 por rol sobre una ruta protegida real (caso PDF C09), y los casos PDF C07 (revocar o vencer un rol → 403 con la misma cookie; vencimientos inválidos → 422) y C08 (autoprotección del ADMIN).
+    - El evento de cambio de contraseña ya lo escribe C-08 en el mismo UoW; acá sólo quedan las altas y los cambios de rol.
 - **Dependencias**: `C-08`
 - **Governance**: CRITICO (gestión de roles / auditoría)
 - **Leer antes**:

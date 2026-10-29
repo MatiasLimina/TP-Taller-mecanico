@@ -1,0 +1,395 @@
+# =============================================================================
+# test/sesion.http -- Casos de C-08 auth-session-guards
+#   (sesion: GET /auth/yo; cambio de contrasena: POST /auth/cambiar-password)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada seccion).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin usuarios):
+#
+#   -- limpia SOLO las filas de este archivo (todos sus correos terminan en @sesion.example.com):
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@sesion.example.com';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@sesion.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@sesion.example.com');
+#   DELETE FROM cliente WHERE documento IN ('41000001', '41000002') OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@sesion.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@sesion.example.com';
+#
+# Los correos y documentos de este archivo son unicos: el archivo es de una sola
+# pasada sobre ese estado. La contrasena comun de partida es ClaveSegura1.
+# Si C-06 (seed) ya existe, correr `python seed.py` antes y luego el bloque de arriba.
+#
+# Reutilizar una sesion: `Cookie: {{loginYo.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+# =============================================================================
+
+@base = http://localhost:8000
+
+# Caso 5: pegar a mano el valor de `access_token` del Set-Cookie del caso 3 (el jar y las
+# variables de respuesta no sirven para armar un encabezado Authorization).
+@tokenYo = PEGAR-AQUI-EL-access_token-DEL-CASO-3
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de yo@sesion.example.com
+# Esperado: 201 con {id, email: "yo@sesion.example.com", nombre, cliente:{...}}
+# @name registroYo
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "yo@sesion.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Yolanda Sesion",
+  "documento": "41000001",
+  "telefono": "1155550001"
+}
+
+### 2. Registro de cambio@sesion.example.com
+# Esperado: 201
+# @name registroCambio
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "cambio@sesion.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Camilo Cambio",
+  "documento": "41000002",
+  "telefono": "1155550002"
+}
+
+### 3. Login de yo
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+# @name loginYo
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "yo@sesion.example.com",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# B. Sesion (C-03 diferido; spec auth-session)
+# =============================================================================
+
+### 4. GET /auth/yo sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+
+### 5. GET /auth/yo sin cookie y con Authorization: Bearer <token real>
+# El token solo se acepta en la cookie (DD-04); un Bearer se ignora.
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"} (el mismo del caso 4)
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Authorization: Bearer {{tokenYo}}
+
+### 6. Cookie access_token vacia
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: access_token=
+
+### 7. Cookie access_token con basura
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}; no emite SQL.
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: access_token=basura
+
+### 8. Sesion valida
+# Esperado: 200 {id, email: "yo@sesion.example.com", nombre: "Yolanda Sesion",
+#   debe_cambiar_password: false, roles_vigentes: ["CLIENTE"], roles_token: ["CLIENTE"]}
+#   SIN password_hash y SIN token. Emite 2 SELECT (usuario, roles).
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+### 9. Cookie valida y Authorization: Bearer basura a la vez
+# Gana la cookie: el encabezado ni se mira.
+# Esperado: 200 igual al del caso 8
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+Authorization: Bearer basura
+
+### 10. Los roles se leen de la base en cada peticion (RN04)
+# Antes (psql): darle a yo un RECEPCION abierto y revocar su CLIENTE:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'RECEPCION' FROM usuario WHERE email = 'yo@sesion.example.com';
+#   UPDATE asignacion_rol SET revocada_en = now()
+#     WHERE rol = 'CLIENTE' AND revocada_en IS NULL
+#       AND usuario_id = (SELECT id FROM usuario WHERE email = 'yo@sesion.example.com');
+# Esperado: 200 con roles_vigentes: ["RECEPCION"] y roles_token: ["CLIENTE"] (el token no cambia)
+# Despues (psql): dejar otra vez solo CLIENTE abierta:
+#   UPDATE asignacion_rol SET revocada_en = now()
+#     WHERE rol = 'RECEPCION' AND revocada_en IS NULL
+#       AND usuario_id = (SELECT id FROM usuario WHERE email = 'yo@sesion.example.com');
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'CLIENTE' FROM usuario WHERE email = 'yo@sesion.example.com';
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+### 11. Usuario desactivado con un token todavia vigente
+# Antes (psql): UPDATE usuario SET activo = false WHERE email = 'yo@sesion.example.com';
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+### 12. Usuario reactivado: la misma cookie vuelve a valer
+# Antes (psql): UPDATE usuario SET activo = true WHERE email = 'yo@sesion.example.com';
+# Esperado: 200 con roles_vigentes: ["CLIENTE"]
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Cambio de contrasena: contrato y contrasena actual (spec auth-password-change)
+# =============================================================================
+
+### 13. Sin cookie y cuerpo valido
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ClaveNueva22"
+}
+
+### 14. Sin cookie y cuerpo con un campo extra
+# La sesion se exige antes que el contrato del cuerpo (S-08).
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"} (NO 422)
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ClaveNueva22",
+  "debe_cambiar_password": false
+}
+
+### 15. Sin cookie y JSON mal formado
+# FastAPI decodifica el cuerpo antes de resolver dependencias (unica excepcion al orden).
+# Esperado: 422 con type "json_invalid"
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+
+{"password_actual":
+
+### 16. Con sesion y campo extra debe_cambiar_password
+# Esperado: 422 con loc ["body", "debe_cambiar_password"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ClaveNueva22",
+  "debe_cambiar_password": false
+}
+
+### 17. password_nueva de 7 caracteres (minimo 8)
+# Esperado: 422 sobre ["body", "password_nueva"]
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "Corta12"
+}
+
+### 18. password_nueva de 37 caracteres n con tilde (74 bytes)
+# Esperado: 422 sobre ["body", "password_nueva"]
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ñññññññññññññññññññññññññññññññññññññ"
+}
+
+### 19. password_actual de 73 caracteres a (73 bytes)
+# Esperado: 422 sobre ["body", "password_actual"]
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "password_nueva": "ClaveNueva22"
+}
+
+### 20. password_nueva igual a password_actual (S-01)
+# Esperado: 422 ("La contraseña nueva debe ser distinta de la actual")
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ClaveSegura1"
+}
+
+### 21. password_actual incorrecta (S-02)
+# Esperado: 401 {"detail": "La contraseña actual es incorrecta"}, SIN Set-Cookie.
+# psql: no hay fila de cambio ni de intento nuevo:
+#   SELECT count(*) FROM evento_seguridad
+#     WHERE actor = 'yo@sesion.example.com' AND accion = 'Cambio de contraseña';  -- 0
+#   SELECT count(*) FROM intento_acceso
+#     WHERE email = 'yo@sesion.example.com';  -- solo el del login del caso 3 (1)
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "Incorrecta99",
+  "password_nueva": "ClaveNueva22"
+}
+
+### 22. La sesion de yo sigue valiendo tras el 401 del caso 21
+# Esperado: 200
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginYo.response.headers.Set-Cookie}}
+
+# =============================================================================
+# D. Cambio obligatorio (caso C-09 del PDF) y RN07
+# =============================================================================
+
+### 23. Login de cambio con cambio pendiente
+# Antes (psql): UPDATE usuario SET debe_cambiar_password = true
+#   WHERE email = 'cambio@sesion.example.com';
+# Esperado: 200 con debe_cambiar_password: true
+# @name loginCambio1
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cambio@sesion.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 24. Otro login de cambio (una segunda sesion anterior al cambio)
+# Esperado: 200
+# @name loginCambio2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cambio@sesion.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 25. GET /auth/yo con cambio pendiente: NO es 403
+# Esperado: 200 con debe_cambiar_password: true
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginCambio1.response.headers.Set-Cookie}}
+
+### 26. Cambio de contrasena (enviar enseguida del caso 25)
+# Esperado: 200 {"mensaje": "Contraseña actualizada", "debe_cambiar_password": false,
+#   "expira_en_segundos": 1800} y Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800;
+#   Path=/; SameSite=lax
+# psql:
+#   SELECT debe_cambiar_password, password_cambiada_en, left(password_hash, 7)
+#     FROM usuario WHERE email = 'cambio@sesion.example.com';
+#     -- debe_cambiar_password=f, password_cambiada_en con microsegundos, hash distinto al anterior
+#   SELECT actor, accion FROM evento_seguridad
+#     WHERE actor = 'cambio@sesion.example.com' AND accion = 'Cambio de contraseña';
+#     -- exactamente una fila
+# @name cambio
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Content-Type: application/json
+Cookie: {{loginCambio1.response.headers.Set-Cookie}}
+
+{
+  "password_actual": "ClaveSegura1",
+  "password_nueva": "ClaveNueva22"
+}
+
+### 27. La cookie del cambio vale
+# Esperado: 200 con debe_cambiar_password: false
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{cambio.response.headers.Set-Cookie}}
+
+### 28. La cookie del loginCambio1 (anterior al cambio, aunque sea la que lo pidio) ya no vale (RN07)
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginCambio1.response.headers.Set-Cookie}}
+
+### 29. La cookie del loginCambio2 (otra sesion anterior) ya no vale (RN07)
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginCambio2.response.headers.Set-Cookie}}
+
+### 30. Login con la contrasena anterior
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cambio@sesion.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 31. Login con la contrasena nueva
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginCambio3
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cambio@sesion.example.com",
+  "password": "ClaveNueva22"
+}
+
+### 32. GET /auth/yo con la cookie del caso 31
+# Esperado: 200
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginCambio3.response.headers.Set-Cookie}}
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP; script temporal no versionado)
+# =============================================================================
+# - Tokens vencido, firmado con otra clave y de usuario inexistente: 401 "La sesión no es
+#   válida o venció".
+# - Authorization: Bearer con un token real automatizado: 401 "Se requiere iniciar sesión".
+# - iat a -1 / 0 / +1 microsegundo de password_cambiada_en; mismo segundo; ida y vuelta
+#   exacta de la fecha en el token.
+# - 403 por cambio pendiente y 403 por rol sobre rutas de sonda (S-06): grupo protegido vacio
+#   en C-08; la evidencia sobre una ruta real llega con C-09.
+# - Orden de rechazos (401 -> 403 cambio pendiente -> 403 rol -> 422 -> operacion).
+# - Conteo de consultas: GET /auth/yo valido = 2 SELECT; cookie basura = 0.
+# - Atomicidad del cambio (fallo del evento: nada cambia) y hash fuera de la transaccion.
