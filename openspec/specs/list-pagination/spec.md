@@ -7,7 +7,7 @@ Define los parámetros, el envoltorio y las reglas de páginas que comparten tod
 ## Requirements
 
 ### Requirement: Envoltorio de listados
-Todo listado SHALL responder un objeto con exactamente `items`, `total`, `page`, `size` y `pages`, donde `total` cuenta con los mismos filtros que la página y `pages` es la cantidad de páginas de tamaño `size`.
+Toda colección que recibe `page`/`size` SHALL responder un objeto con exactamente `items`, `total`, `page`, `size` y `pages`, donde `total` cuenta con los mismos filtros que la página y `pages` es la cantidad de páginas de tamaño `size`. Un detalle de recurso que embebe un historial acotado (p. ej. `GET /usuarios/{id}/roles`) no es un listado paginado y no usa este envoltorio.
 
 #### Scenario: Primera página
 - **WHEN** hay 3 elementos que cumplen el filtro y se pide `size=2`

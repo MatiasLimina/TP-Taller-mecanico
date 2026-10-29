@@ -32,9 +32,11 @@ from app.core.errores import (
     Conflicto,
     DemasiadosIntentos,
     NoAutenticado,
+    NoEncontrado,
     SinPermiso,
     restriccion_violada,
 )
+from app.core.paginacion import Pagina, Paginacion, armar_pagina, verificar_pagina
 from app.core.security import (
     PasswordInvalidaError,
     TokenInvalidoError,
@@ -46,13 +48,19 @@ from app.core.security import (
 from app.modules.clientes.models import Cliente
 from app.modules.usuarios.models import AsignacionRol, EventoSeguridad, Rol, Usuario
 from app.modules.usuarios.schemas import (
+    AsignacionRolEntrada,
+    AsignacionSalida,
     CambioPasswordEntrada,
     ClienteRegistradoSalida,
+    EventoSalida,
     LoginEntrada,
     LoginSalida,
     PerfilSalida,
+    PersonalAltaEntrada,
+    PersonalSalida,
     RegistroEntrada,
     RegistroSalida,
+    RolesUsuarioSalida,
 )
 from app.modules.usuarios.unit_of_work import AnotadorIntentos, UsuariosUoW
 
@@ -74,6 +82,20 @@ MENSAJE_SIN_PERMISO = "No tiene permiso para realizar esta operación"
 MENSAJE_PASSWORD_ACTUAL_INCORRECTA = "La contraseña actual es incorrecta"
 MENSAJE_PASSWORD_ACTUALIZADA = "Contraseña actualizada"
 ACCION_CAMBIO_PASSWORD = "Cambio de contraseña"
+
+ACCION_ALTA_PERSONAL = "Alta de personal: {email}"
+
+MENSAJE_USUARIO_INEXISTENTE = "El usuario no existe"
+MENSAJE_ROL_YA_VIGENTE = "El usuario ya tiene el rol {rol} vigente"
+MENSAJE_ROL_NO_VIGENTE = "El usuario no tiene el rol {rol} vigente"
+MENSAJE_AUTOREVOCACION = "Un administrador no puede revocarse su propio rol ADMIN"
+MENSAJE_SIN_ADMINISTRADORES = (
+    "No se puede revocar: el sistema quedaría sin administradores vigentes sin vencimiento"
+)
+ACCION_ASIGNACION = "Asignación del rol {rol} a {email}"
+ACCION_REVOCACION = "Revocación del rol {rol} a {email}"
+SUFIJO_VENCE = " hasta {vence}"
+SUFIJO_REEMPLAZA = " (reemplaza una asignación vencida)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -295,3 +317,192 @@ async def cambiar_password(
             expira_en_segundos=get_settings().access_token_expire_seconds,
         ),
     )
+
+
+async def listar_eventos(uow: UsuariosUoW, pag: Paginacion) -> Pagina[EventoSalida]:
+    """Historial de seguridad paginado, del más reciente al más antiguo (C-09)."""
+    async with uow:
+        total = await uow.eventos.count()
+        verificar_pagina(pag, total)
+        eventos = await uow.eventos.listar_recientes(offset=pag.offset, limit=pag.size)
+        items = [EventoSalida.model_validate(evento) for evento in eventos]
+    return armar_pagina(items, total, pag)
+
+
+async def alta_personal(
+    uow: UsuariosUoW, actual: UsuarioActual, datos: PersonalAltaEntrada
+) -> PersonalSalida:
+    """Alta de una cuenta de personal por un ADMIN: usuario + evento, todo o nada (C-09, D3).
+
+    La cuenta nace activa, con la contraseña provisoria y `debe_cambiar_password` verdadero, sin
+    roles ni ficha de cliente (se asignan con `POST /usuarios/{id}/roles`). La unicidad del
+    correo la decide `uq_usuario_email` (sin consulta previa; también con altas simultáneas) y
+    se traduce fuera del bloque. bcrypt corre ANTES de abrir la transacción (DD-06).
+    """
+    password_hash = await hash_password(datos.password_provisoria)
+    try:
+        async with uow:
+            usuario = await uow.usuarios.add(
+                Usuario(
+                    email=datos.email,
+                    nombre=datos.nombre,
+                    password_hash=password_hash,
+                    debe_cambiar_password=True,
+                )
+            )
+            await uow.eventos.add(
+                EventoSeguridad(
+                    actor=actual.email, accion=ACCION_ALTA_PERSONAL.format(email=usuario.email)
+                )
+            )
+            # Se arma adentro, con valores ya cargados: afuera podría haber un rollback.
+            salida = PersonalSalida.model_validate(usuario)
+    except IntegrityError as exc:
+        if restriccion_violada(exc) == "uq_usuario_email":
+            raise Conflicto(MENSAJE_CORREO_REPETIDO) from None
+        raise
+    return salida
+
+
+def _vigente(asignacion: AsignacionRol, ahora: datetime) -> bool:
+    """Única definición de "vigente" para las salidas: no revocada y sin vencer a `ahora`.
+
+    Es la misma regla que `AsignacionRolRepository.roles_vigentes` (que la aplica en SQL).
+    """
+    return asignacion.revocada_en is None and (
+        asignacion.vence_en is None or asignacion.vence_en > ahora
+    )
+
+
+def _salida_asignacion(asignacion: AsignacionRol, ahora: datetime) -> AsignacionSalida:
+    # Valores ya cargados (se llama dentro del bloque); `id` nunca es None tras el flush.
+    assert asignacion.id is not None
+    return AsignacionSalida(
+        id=asignacion.id,
+        usuario_id=asignacion.usuario_id,
+        rol=asignacion.rol,
+        desde=asignacion.desde,
+        vence_en=asignacion.vence_en,
+        revocada_en=asignacion.revocada_en,
+        otorgada_por=asignacion.otorgada_por,
+        vigente=_vigente(asignacion, ahora),
+    )
+
+
+def _fecha_evento(instante: datetime) -> str:
+    return instante.astimezone(UTC).isoformat().replace("+00:00", "Z")
+
+
+async def asignar_rol(
+    uow: UsuariosUoW, actual: UsuarioActual, usuario_id: int, datos: AsignacionRolEntrada
+) -> AsignacionSalida:
+    """Abre una asignación de rol vigente: una sola abierta por rol y usuario (RN03, C-09 D4).
+
+    La fila abierta del rol se lee con `FOR UPDATE`. Si está vigente -> 409. Si está abierta
+    pero vencida, se cierra (`revocada_en = ahora`) y se abre otra en la MISMA transacción: el
+    índice parcial `uq_asignacion_rol_usuario_id_rol` trata como abierta a una fila vencida, así
+    que el cierre va antes del INSERT (el repositorio hace `flush` en cada escritura). Ninguna
+    fila se borra. Con asignaciones simultáneas decide el índice: la perdedora recibe el mismo
+    409, traducido fuera del bloque.
+    """
+    rol = datos.rol.value
+    ahora = datetime.now(UTC)
+    try:
+        async with uow:
+            usuario = await uow.usuarios.get_by_id(usuario_id)
+            if usuario is None:
+                raise NoEncontrado(MENSAJE_USUARIO_INEXISTENTE)
+            abierta = await uow.asignaciones.abierta_para_actualizar(usuario_id, rol)
+            if abierta is not None and _vigente(abierta, ahora):
+                raise Conflicto(MENSAJE_ROL_YA_VIGENTE.format(rol=rol))
+            if abierta is not None:  # abierta pero vencida: se cierra antes de abrir la nueva
+                await uow.asignaciones.update(abierta, {"revocada_en": ahora})
+            nueva = await uow.asignaciones.add(
+                AsignacionRol(
+                    usuario_id=usuario_id,
+                    rol=rol,
+                    desde=ahora,
+                    vence_en=datos.vence_en,
+                    otorgada_por=actual.id,
+                )
+            )
+            accion = ACCION_ASIGNACION.format(rol=rol, email=usuario.email)
+            if nueva.vence_en is not None:
+                accion += SUFIJO_VENCE.format(vence=_fecha_evento(nueva.vence_en))
+            if abierta is not None:
+                accion += SUFIJO_REEMPLAZA
+            await uow.eventos.add(EventoSeguridad(actor=actual.email, accion=accion))
+            salida = _salida_asignacion(nueva, ahora)
+    except IntegrityError as exc:
+        # Fuera del bloque: el rollback ya ocurrió. El mensaje usa `rol` del contrato.
+        if restriccion_violada(exc) == "uq_asignacion_rol_usuario_id_rol":
+            raise Conflicto(MENSAJE_ROL_YA_VIGENTE.format(rol=rol)) from None
+        raise
+    return salida
+
+
+async def roles_de_usuario(uow: UsuariosUoW, usuario_id: int) -> RolesUsuarioSalida:
+    """Historial completo de asignaciones del usuario y sus roles vigentes a este instante."""
+    ahora = datetime.now(UTC)
+    async with uow:
+        usuario = await uow.usuarios.get_by_id(usuario_id)
+        if usuario is None:
+            raise NoEncontrado(MENSAJE_USUARIO_INEXISTENTE)
+        filas = await uow.asignaciones.historial(usuario_id)
+        asignaciones = [_salida_asignacion(fila, ahora) for fila in filas]
+        salida = RolesUsuarioSalida(
+            usuario_id=usuario_id,
+            email=usuario.email,
+            nombre=usuario.nombre,
+            roles_vigentes=sorted({a.rol for a in asignaciones if a.vigente}),
+            asignaciones=asignaciones,
+        )
+    return salida
+
+
+async def revocar_rol(
+    uow: UsuariosUoW, actual: UsuarioActual, usuario_id: int, rol: Rol
+) -> AsignacionSalida:
+    """Revoca (escribe `revocada_en`, no borra) el rol vigente de un usuario (RN03/RN05, C-09 D5).
+
+    Orden de los rechazos: 404 usuario -> 409 autoprotección -> 404 rol no vigente -> 409 sin
+    administradores. Revocar un rol no vigente (nunca lo tuvo, ya revocado o vencido) es 404.
+
+    RN05 (S-09): siempre debe quedar al menos una asignación ADMIN VIGENTE SIN VENCIMIENTO de un
+    usuario activo. Las ADMIN con `vence_en` no cuentan: el paso del tiempo las apagaría sin
+    pasar por acá. Un ADMIN nunca se revoca su propio ADMIN.
+
+    Por qué se bloquea: dos ADMIN sin vencimiento que se revocan entre sí a la vez verían cada
+    uno al otro en el conjunto y confirmarían los dos, dejando cero. Con `FOR UPDATE` sobre
+    TODO el conjunto, la segunda transacción espera; al seguir, PostgreSQL reevalúa el filtro y
+    descarta la fila que la primera revocó, así que el conjunto queda en su propia fila (que es
+    el objetivo) y responde 409.
+
+    Por qué el conjunto se bloquea ANTES que el objetivo, y en orden de id: si cada transacción
+    tomara primero su objetivo, dos revocaciones cruzadas se esperarían mutuamente (`40P01`,
+    un 500). Así todas toman las mismas filas en el mismo orden y sólo se hace cola.
+    """
+    ahora = datetime.now(UTC)
+    async with uow:
+        usuario = await uow.usuarios.get_by_id(usuario_id)
+        if usuario is None:
+            raise NoEncontrado(MENSAJE_USUARIO_INEXISTENTE)
+        if rol is Rol.ADMIN and usuario_id == actual.id:
+            raise Conflicto(MENSAJE_AUTOREVOCACION)
+        permanentes: list[AsignacionRol] = []
+        if rol is Rol.ADMIN:
+            permanentes = await uow.asignaciones.admins_sin_vencimiento_para_actualizar()
+        objetivo = await uow.asignaciones.abierta_para_actualizar(usuario_id, rol.value)
+        if objetivo is None or not _vigente(objetivo, ahora):
+            raise NoEncontrado(MENSAJE_ROL_NO_VIGENTE.format(rol=rol.value))
+        if rol is Rol.ADMIN and not any(fila.id != objetivo.id for fila in permanentes):
+            raise Conflicto(MENSAJE_SIN_ADMINISTRADORES)
+        await uow.asignaciones.update(objetivo, {"revocada_en": ahora})
+        await uow.eventos.add(
+            EventoSeguridad(
+                actor=actual.email,
+                accion=ACCION_REVOCACION.format(rol=rol.value, email=usuario.email),
+            )
+        )
+        salida = _salida_asignacion(objetivo, ahora)
+    return salida
