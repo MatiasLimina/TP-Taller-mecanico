@@ -5,8 +5,9 @@ SQL armado con datos del usuario); las escrituras hacen `flush()` o ejecutan una
 NUNCA confirman la transacción. Las lecturas devuelven entidades sin relaciones o columnas
 sueltas: no hay carga perezosa posible.
 
-`movimiento_stock` e `historial_precio_repuesto` son de sólo agregado (C-04): sus repositorios
-solo exponen `add()`; C-12 les agrega el listado.
+`movimiento_stock` e `historial_precio_repuesto` son de sólo agregado (C-04, RN15): sus
+repositorios solo exponen `add()` y, desde C-12, `listar_de_repuesto` (lectura por repuesto,
+en orden de registro); ningún `update` ni `delete` sobre esas tablas.
 """
 
 from datetime import datetime
@@ -134,7 +135,25 @@ class MovimientoStockRepository(BaseRepository[MovimientoStock]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, MovimientoStock)
 
+    async def listar_de_repuesto(self, repuesto_id: int) -> list[MovimientoStock]:
+        """Movimientos de un repuesto en orden de registro (id ascendente). Sin relaciones."""
+        consulta = (
+            self._consulta_base()
+            .where(col(MovimientoStock.repuesto_id) == repuesto_id)
+            .order_by(col(MovimientoStock.id))
+        )
+        return list((await self.session.exec(consulta)).all())
+
 
 class HistorialPrecioRepository(BaseRepository[HistorialPrecioRepuesto]):
     def __init__(self, session: AsyncSession) -> None:
         super().__init__(session, HistorialPrecioRepuesto)
+
+    async def listar_de_repuesto(self, repuesto_id: int) -> list[HistorialPrecioRepuesto]:
+        """Líneas de precio de un repuesto en orden de registro (id ascendente). Sin relaciones."""
+        consulta = (
+            self._consulta_base()
+            .where(col(HistorialPrecioRepuesto.repuesto_id) == repuesto_id)
+            .order_by(col(HistorialPrecioRepuesto.id))
+        )
+        return list((await self.session.exec(consulta)).all())
