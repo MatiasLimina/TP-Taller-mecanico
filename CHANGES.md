@@ -71,7 +71,7 @@ GATE 4: C-08 ✓                          ← FORK
   → C-11 repuestos-catalogo            [hecho]
 
 GATE 5: C-11 ✓
-  → C-12 repuestos-stock-precios
+  → C-12 repuestos-stock-precios        [hecho]
   → C-13 ordenes-alta-estados           [si C-10 ✓ además]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
@@ -304,7 +304,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/03_actores_y_roles.md` §RBAC (rutas /repuestos)
 
 ### [C-12] `repuestos-stock-precios`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `POST /repuestos/{id}/reponer` (ADMIN): suma stock y registra `movimiento_stock` (cantidad positiva, motivo) en una transacción; cantidad inválida → 422
   - `GET /repuestos/{id}/movimientos` (ADMIN), `GET /repuestos/{id}/precios` (ADMIN, historial)
@@ -406,4 +406,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-29)**: C-01…C-05, C-07…C-09 y C-11 completados; C-06 y C-10 propuestos; próximo: C-12.
+**Estado (2026-10-30)**: C-01…C-05, C-07…C-09, C-11 y C-12 completados; C-06 propuesto; C-10 implementado sin archivar; C-13 propuesto (en otra rama); próximo: C-13.

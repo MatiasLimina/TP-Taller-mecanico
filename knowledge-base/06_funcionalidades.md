@@ -48,9 +48,9 @@ Organizadas por épica. Los criterios derivan de los ejercicios y casos de prueb
 - [ ] `GET /repuestos?q&page&size` con búsqueda por descripción **o código** (C-11, S-08) con parámetros ligados (`' OR '1'='1` → lista vacía)
 - [ ] `POST` con `stock_inicial` (genera movimiento "Stock inicial"); `PATCH` sólo descripción y precio (stock → 422; si cambia el precio, línea de historial — RN20, C-11); `DELETE` lógico
 ### US-041 — Reposición y movimientos (RN14)
-- [ ] `POST /repuestos/{id}/reponer`; `GET /repuestos/{id}/movimientos`
+- [ ] `POST /repuestos/{id}/reponer`; `GET /repuestos/{id}/movimientos` (C-12)
 ### US-042 — Historial de precios (RN20) — C-18
-- [ ] Cambio de precio crea línea (anterior/nuevo) en la misma transacción; PATCH de sólo descripción no crea línea; RECEPCION → 403
+- [ ] Cambio de precio crea línea (anterior/nuevo) en la misma transacción; PATCH de sólo descripción no crea línea; RECEPCION → 403 (`GET /repuestos/{id}/precios` en C-12; el registro en PATCH en C-11)
 
 ## Épica 6: Órdenes de trabajo
 ### US-050 — Alta de orden (RN10, RN19) — C-10
