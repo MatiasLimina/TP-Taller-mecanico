@@ -1,0 +1,1030 @@
+# =============================================================================
+# test/repuestos.http -- Casos de C-11 repuestos-catalogo
+#   (catalogo: GET /repuestos, GET /repuestos/{id}; escrituras solo ADMIN: POST /repuestos,
+#    PATCH /repuestos/{id}, DELETE /repuestos/{id}; stock inicial por el punto unico de
+#    escritura de stock (RN14); historial de precios en el PATCH (RN20))
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada caso).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin repuestos ni usuarios):
+#
+#   -- 1) vacia el dominio de repuestos. El disparador de solo agregado rechaza DELETE en
+#   --    movimiento_stock e historial_precio_repuesto; TRUNCATE no lo dispara (es la via que usa
+#   --    seed.py para recargar el estado inicial). Sin CASCADE: falla si otra tabla los referenciara.
+#   --    ATENCION: vacia TODOS los repuestos, tambien los de otros datos de desarrollo.
+#   TRUNCATE item_orden, movimiento_stock, historial_precio_repuesto, repuesto RESTART IDENTITY;
+#
+#   -- 2) limpia SOLO los usuarios de este archivo (todos sus correos terminan en @repuestos.example.com):
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@repuestos.example.com'
+#     OR accion LIKE '%@repuestos.example.com%';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@repuestos.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@repuestos.example.com')
+#     OR otorgada_por IN (SELECT id FROM usuario WHERE email LIKE '%@repuestos.example.com');
+#   DELETE FROM cliente WHERE documento IN ('44000001', '44000002', '44000003', '44000004') OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@repuestos.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@repuestos.example.com';
+#
+# Si C-06 (seed) ya existe, correr `python seed.py` antes y luego el bloque de arriba.
+# Los correos, documentos y codigos de este archivo son unicos: el archivo es de una sola
+# pasada sobre ese estado.
+#
+# Reutilizar una sesion: `Cookie: {{loginJefa.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Personas: jefa (ADMIN), recepcion (RECEPCION), mecanico (MECANICO) -- las tres creadas por
+# registro + INSERT del rol -- y cliente (solo CLIENTE). Los caracteres especiales de `q` van
+# codificados en la URL.
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de jefa@repuestos.example.com
+# Esperado: 201 con {id, email: "jefa@repuestos.example.com", nombre, cliente:{...}}
+# Despues (psql): jefa pasa a ser ADMIN:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'ADMIN' FROM usuario WHERE email = 'jefa@repuestos.example.com';
+# @name registroJefa
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jefa@repuestos.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Josefina Jefa",
+  "documento": "44000001",
+  "telefono": "1155550001"
+}
+
+### 2. Registro de recepcion@repuestos.example.com
+# Esperado: 201
+# Despues (psql): recepcion pasa a ser RECEPCION:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'RECEPCION' FROM usuario WHERE email = 'recepcion@repuestos.example.com';
+# @name registroRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "recepcion@repuestos.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Rita Recepcion",
+  "documento": "44000002",
+  "telefono": "1155550002"
+}
+
+### 3. Registro de mecanico@repuestos.example.com
+# Esperado: 201
+# Despues (psql): mecanico pasa a ser MECANICO:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'MECANICO' FROM usuario WHERE email = 'mecanico@repuestos.example.com';
+# @name registroMecanico
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "mecanico@repuestos.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Mario Mecanico",
+  "documento": "44000003",
+  "telefono": "1155550003"
+}
+
+### 4. Registro de cliente@repuestos.example.com (queda solo CLIENTE)
+# Esperado: 201
+# @name registroCliente
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "cliente@repuestos.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Carlos Cliente",
+  "documento": "44000004",
+  "telefono": "1155550004"
+}
+
+### 5. Login de jefa (despues del INSERT de rol del caso 1)
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+# @name loginJefa
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "jefa@repuestos.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 6. Login de recepcion
+# Esperado: 200
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@repuestos.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 7. Login de mecanico
+# Esperado: 200
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@repuestos.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 8. Login de cliente
+# Esperado: 200
+# @name loginCliente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cliente@repuestos.example.com",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# B. Acceso (spec parts-catalog, "Acceso al catalogo por rol")
+# =============================================================================
+
+### 9. GET /repuestos sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/repuestos
+
+### 10. GET /repuestos con la sesion de un cliente (solo CLIENTE)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/repuestos
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 11. GET /repuestos/1 con la sesion de un cliente
+# El rol se exige antes de buscar el repuesto.
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"} (NO 404)
+# @no-cookie-jar
+GET {{base}}/repuestos/1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 12. POST /repuestos con la sesion de recepcion y cuerpo valido
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: no existe el repuesto:
+#   SELECT count(*) FROM repuesto WHERE codigo = 'R11-INTRUSO';  -- 0
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-INTRUSO",
+  "descripcion": "Repuesto del intruso",
+  "precio": 1000
+}
+
+### 13. POST /repuestos con la sesion de mecanico y cuerpo valido
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: no existe el repuesto:
+#   SELECT count(*) FROM repuesto WHERE codigo = 'R11-INTRUSO';  -- 0
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-INTRUSO",
+  "descripcion": "Repuesto del intruso",
+  "precio": 1000
+}
+
+### 14. POST /repuestos sin cookie y con un campo extra
+# La sesion se exige antes que el contrato del cuerpo.
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"} (NO 422)
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+
+{
+  "codigo": "R11-INTRUSO",
+  "descripcion": "Repuesto del intruso",
+  "precio": 1000,
+  "stock": 5
+}
+
+### 15. GET /repuestos con la sesion de recepcion (catalogo vacio)
+# Esperado: 200 {"items": [], "total": 0, "page": 1, "size": 20, "pages": 1}
+# @no-cookie-jar
+GET {{base}}/repuestos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Alta (specs parts-catalog y stock-movements)
+# =============================================================================
+
+### 16. Alta con codigo y descripcion a normalizar y stock inicial
+# Esperado: 201 exactamente {"id": <n>, "codigo": "FIL-ACE-01", "descripcion": "Filtro de aceite",
+#   "precio": "8500.00", "stock": 10}
+# psql: un movimiento de stock inicial hecho por jefa, sin orden:
+#   SELECT cantidad, motivo, orden_id, usuario_id = (SELECT id FROM usuario WHERE email = 'jefa@repuestos.example.com')
+#     FROM movimiento_stock WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'FIL-ACE-01');
+#     -- 10 | Stock inicial | (NULL) | t
+# @name altaFiltro
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": " fil-ace-01 ",
+  "descripcion": "  Filtro de aceite ",
+  "precio": 8500,
+  "stock_inicial": 10
+}
+
+### 17. Alta con precio en texto y stock inicial 4
+# Esperado: 201 {"id": <n>, "codigo": "PAS-FRE-DEL", "descripcion": "Pastillas de freno delanteras",
+#   "precio": "32000.00", "stock": 4}
+# @name altaPastillas
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "PAS-FRE-DEL",
+  "descripcion": "Pastillas de freno delanteras",
+  "precio": "32000.00",
+  "stock_inicial": 4
+}
+
+### 18. Alta sin stock_inicial y con precio de un decimal
+# Esperado: 201 con "precio": "4500.50" y "stock": 0
+# psql: sin movimientos de BUJ-01:
+#   SELECT count(*) FROM movimiento_stock WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'BUJ-01');  -- 0
+# @name altaBujia
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "BUJ-01",
+  "descripcion": "Bujía",
+  "precio": 4500.5
+}
+
+### 19. Alta con stock_inicial 0 explicito
+# Esperado: 201 con "stock": 0 (sin movimiento: el CHECK cantidad <> 0 lo impide y SUM = 0 = stock)
+# @name altaAceite
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ACE-5W30-1L",
+  "descripcion": "Aceite 5W30 por litro",
+  "precio": 12000,
+  "stock_inicial": 0
+}
+
+### 20. Codigo repetido (normalizado a mayusculas)
+# Esperado: 409 {"detail": "Ya existe un repuesto vigente con el código FIL-ACE-01"}
+# psql: un solo FIL-ACE-01 y 2 movimientos en total (filtro y pastillas):
+#   SELECT count(*) FROM repuesto WHERE codigo = 'FIL-ACE-01';  -- 1
+#   SELECT count(*) FROM movimiento_stock;  -- 2
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "fil-ace-01",
+  "descripcion": "Otro filtro",
+  "precio": 1000,
+  "stock_inicial": 3
+}
+
+### 21. Campo reservado stock en el cuerpo (RN14)
+# Esperado: 422 con loc ["body", "stock"] y type "extra_forbidden"
+# psql: no se creo:
+#   SELECT count(*) FROM repuesto WHERE codigo = 'R11-STOCK';  -- 0
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-STOCK",
+  "descripcion": "Con stock directo",
+  "precio": 1000,
+  "stock": 5
+}
+
+### 22. precio 0
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio cero",
+  "precio": 0
+}
+
+### 23. precio negativo
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio negativo",
+  "precio": -1
+}
+
+### 24. precio con tres decimales
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio con tres decimales",
+  "precio": 12.345
+}
+
+### 25. precio de nueve digitos enteros (NUMERIC(10,2) admite 8)
+# Esperado: 422 sobre ["body", "precio"] (NO 500)
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio enorme",
+  "precio": 123456789
+}
+
+### 26. precio no numerico
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio texto",
+  "precio": "abc"
+}
+
+### 27. precio NaN
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-PRECIO",
+  "descripcion": "Precio NaN",
+  "precio": "NaN"
+}
+
+### 28. stock_inicial negativo
+# Esperado: 422 sobre ["body", "stock_inicial"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-STOCKINI",
+  "descripcion": "Stock inicial negativo",
+  "precio": 1000,
+  "stock_inicial": -1
+}
+
+### 29. stock_inicial decimal
+# Esperado: 422 sobre ["body", "stock_inicial"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-STOCKINI",
+  "descripcion": "Stock inicial decimal",
+  "precio": 1000,
+  "stock_inicial": 1.5
+}
+
+### 30. stock_inicial por encima del tope (100000)
+# Esperado: 422 sobre ["body", "stock_inicial"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-STOCKINI",
+  "descripcion": "Stock inicial enorme",
+  "precio": 1000,
+  "stock_inicial": 100001
+}
+
+### 31. codigo de solo espacios
+# Esperado: 422 sobre ["body", "codigo"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "   ",
+  "descripcion": "Codigo vacio",
+  "precio": 1000
+}
+
+### 32. codigo con espacio interior
+# Esperado: 422 sobre ["body", "codigo"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "FIL ACE",
+  "descripcion": "Codigo con espacio",
+  "precio": 1000
+}
+
+### 33. codigo con guion bajo
+# Esperado: 422 sobre ["body", "codigo"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "FIL_ACE",
+  "descripcion": "Codigo con guion bajo",
+  "precio": 1000
+}
+
+### 34. codigo de 31 caracteres (maximo 30)
+# Esperado: 422 sobre ["body", "codigo"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "descripcion": "Codigo largo",
+  "precio": 1000
+}
+
+### 35. Sin descripcion
+# Esperado: 422 sobre ["body", "descripcion"] con type "missing"
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-SINDESC",
+  "precio": 1000
+}
+
+### 36. descripcion de solo espacios
+# Esperado: 422 sobre ["body", "descripcion"]
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "R11-SINDESC",
+  "descripcion": "   ",
+  "precio": 1000
+}
+
+### 37. JSON mal formado
+# Esperado: 422 con type "json_invalid"
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{"codigo":
+
+# =============================================================================
+# D. Lecturas (spec parts-catalog; PDF C-16)
+#    Estado: filtro (id 1, stock 10), pastillas (2, stock 4), bujia (3, stock 0), aceite (4, stock 0)
+# =============================================================================
+
+### 38. Listado completo con la sesion de mecanico
+# Esperado: 200 con los 4 repuestos en orden de id, "total": 4, "page": 1, "size": 20, "pages": 1;
+#   cada item con exactamente id, codigo, descripcion, precio (texto) y stock.
+# @no-cookie-jar
+GET {{base}}/repuestos
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 39. Pagina 1 de tamano 2
+# Esperado: 200 con 2 items (filtro y pastillas), "total": 4, "size": 2, "pages": 2
+# @no-cookie-jar
+GET {{base}}/repuestos?size=2
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 40. Pagina 2 de tamano 2
+# Esperado: 200 con 2 items (bujia y aceite), "page": 2
+# @no-cookie-jar
+GET {{base}}/repuestos?size=2&page=2
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 41. Pagina inexistente
+# Esperado: 422 {"detail": "La página 3 no existe: hay 2"}
+# @no-cookie-jar
+GET {{base}}/repuestos?size=2&page=3
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 42. size por encima del maximo
+# Esperado: 422 sobre ["query", "size"]
+# @no-cookie-jar
+GET {{base}}/repuestos?size=500
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 43. page 0
+# Esperado: 422 sobre ["query", "page"]
+# @no-cookie-jar
+GET {{base}}/repuestos?page=0
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 44. page no numerica
+# Esperado: 422 sobre ["query", "page"]
+# @no-cookie-jar
+GET {{base}}/repuestos?page=abc
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 45. Busqueda por descripcion (sin distinguir mayusculas) con size 1
+# Esperado: 200 con las pastillas, "total": 1, "pages": 1
+# @no-cookie-jar
+GET {{base}}/repuestos?q=freno&size=1
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 46. Pagina 2 de una busqueda con un solo resultado
+# Esperado: 422 {"detail": "La página 2 no existe: hay 1"}
+# @no-cookie-jar
+GET {{base}}/repuestos?q=freno&size=1&page=2
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 47. Busqueda en mayusculas
+# Esperado: 200 solo con el filtro ("Filtro de aceite"), "total": 1
+# @no-cookie-jar
+GET {{base}}/repuestos?q=FILTRO
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 48. Busqueda por codigo (S-08)
+# Esperado: 200 solo con las pastillas (PAS-FRE-DEL), "total": 1
+# @no-cookie-jar
+GET {{base}}/repuestos?q=pas-fre
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 49. Busqueda con inyeccion SQL (q = ' OR '1'='1)
+# El texto viaja como parametro ligado: se busca literalmente.
+# Esperado: 200 con "items": [], "total": 0, "pages": 1
+# @no-cookie-jar
+GET {{base}}/repuestos?q=%27%20OR%20%271%27%3D%271
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 50. Busqueda por el comodin % (q = %)
+# Los comodines de LIKE se escapan: ninguna descripcion ni codigo contiene "%".
+# Esperado: 200 con "total": 0
+# @no-cookie-jar
+GET {{base}}/repuestos?q=%25
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 51. Busqueda por el comodin _ (q = _)
+# Esperado: 200 con "total": 0 (ningun texto contiene "_")
+# @no-cookie-jar
+GET {{base}}/repuestos?q=_
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 52. Busqueda de solo espacios
+# Se recorta: queda vacia y no filtra.
+# Esperado: 200 con "total": 4
+# @no-cookie-jar
+GET {{base}}/repuestos?q=%20%20
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 53. Busqueda de 101 caracteres (maximo 100)
+# Esperado: 422 sobre ["query", "q"]
+# @no-cookie-jar
+GET {{base}}/repuestos?q=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 54. Detalle del filtro con la sesion de recepcion
+# Esperado: 200 exactamente {"id": <n>, "codigo": "FIL-ACE-01", "descripcion": "Filtro de aceite",
+#   "precio": "8500.00", "stock": 10}
+# @no-cookie-jar
+GET {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 55. Detalle de la bujia con la sesion de mecanico
+# Esperado: 200 con "codigo": "BUJ-01", "precio": "4500.50", "stock": 0
+# @no-cookie-jar
+GET {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 56. Detalle de un repuesto inexistente
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+GET {{base}}/repuestos/999999
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 57. Detalle con id no numerico
+# Esperado: 422 sobre ["path", "repuesto_id"]
+# @no-cookie-jar
+GET {{base}}/repuestos/abc
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 58. Detalle con id 0
+# Esperado: 422 sobre ["path", "repuesto_id"]
+# @no-cookie-jar
+GET {{base}}/repuestos/0
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# E. Edicion (specs parts-catalog y price-history; PDF C-16 y C-18)
+#    Todas las consultas psql de esta seccion son sobre el filtro:
+#      SELECT precio_anterior, precio_nuevo FROM historial_precio_repuesto
+#        WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'FIL-ACE-01') ORDER BY id;
+# =============================================================================
+
+### 59. PATCH solo de descripcion (no toca precio ni stock)
+# Esperado: 200 con "descripcion": "Filtro de aceite sintético", "precio": "8500.00", "stock": 10
+# psql: 0 lineas de historial del filtro.
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "Filtro de aceite sintético"
+}
+
+### 60. PATCH de precio (RN20)
+# Esperado: 200 con "precio": "9000.00" y "stock": 10
+# psql: 1 linea de historial: 8500.00 -> 9000.00, usuario_id = id de jefa:
+#   SELECT usuario_id = (SELECT id FROM usuario WHERE email = 'jefa@repuestos.example.com')
+#     FROM historial_precio_repuesto WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'FIL-ACE-01');  -- t
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": 9000
+}
+
+### 61. PATCH de descripcion (vuelve a "Filtro de aceite")
+# Esperado: 200 con "descripcion": "Filtro de aceite", "precio": "9000.00"
+# psql: sigue 1 linea de historial.
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "Filtro de aceite"
+}
+
+### 62. PATCH con el mismo precio (en texto)
+# Esperado: 200 con "precio": "9000.00"
+# psql: sigue 1 linea de historial (mismo precio: sin linea).
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": "9000.00"
+}
+
+### 63. PATCH de precio y descripcion juntos
+# Esperado: 200 con "precio": "9500.50" y "descripcion": "Filtro premium"
+# psql: 2 lineas de historial; la segunda 9000.00 -> 9500.50.
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": 9500.5,
+  "descripcion": "Filtro premium"
+}
+
+### 64. PATCH con stock (RN14)
+# Esperado: 422 con loc ["body", "stock"] y type "extra_forbidden"
+# psql: el stock del filtro sigue en 10:
+#   SELECT stock FROM repuesto WHERE codigo = 'FIL-ACE-01';  -- 10
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "stock": 50
+}
+
+### 65. PATCH con codigo (el codigo no se edita)
+# Esperado: 422 con loc ["body", "codigo"] y type "extra_forbidden"
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "OTRO-01"
+}
+
+### 66. PATCH con precio null
+# Esperado: 422 sobre ["body", "precio"] con msg que contiene "El campo no puede ser nulo"
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": null
+}
+
+### 67. PATCH con descripcion null
+# Esperado: 422 sobre ["body", "descripcion"] con msg que contiene "El campo no puede ser nulo"
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": null
+}
+
+### 68. PATCH con precio 0
+# Esperado: 422 sobre ["body", "precio"]
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": 0
+}
+
+### 69. PATCH con descripcion de solo espacios
+# Esperado: 422 sobre ["body", "descripcion"]
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "   "
+}
+
+### 70. PATCH vacio
+# Esperado: 200 sin cambios (descripcion "Filtro premium", precio "9500.50", stock 10)
+# psql: siguen 2 lineas de historial.
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{}
+
+### 71. PATCH de precio con la sesion de recepcion
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: precio 9500.50 y 2 lineas de historial:
+#   SELECT precio FROM repuesto WHERE codigo = 'FIL-ACE-01';  -- 9500.50
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "precio": 1
+}
+
+### 72. PATCH de precio con la sesion de mecanico
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: precio 9500.50 y 2 lineas de historial.
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+{
+  "precio": 1
+}
+
+### 73. PATCH de un repuesto inexistente
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+PATCH {{base}}/repuestos/999999
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "No existe"
+}
+
+### 74. PATCH con id no numerico
+# Esperado: 422 sobre ["path", "repuesto_id"]
+# @no-cookie-jar
+PATCH {{base}}/repuestos/abc
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "No existe"
+}
+
+### 75. Detalle del filtro tras las ediciones
+# Esperado: 200 con "descripcion": "Filtro premium", "precio": "9500.50", "stock": 10
+# @no-cookie-jar
+GET {{base}}/repuestos/{{altaFiltro.response.body.$.id}}
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# F. Baja (specs parts-catalog y stock-movements)
+# =============================================================================
+
+### 76. DELETE de la bujia con la sesion de recepcion
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+DELETE {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 77. DELETE de la bujia con la sesion de jefa
+# Esperado: 204 sin cuerpo
+# psql: la fila sigue, con borrado_en no nulo (baja logica, RN16):
+#   SELECT borrado_en IS NOT NULL FROM repuesto WHERE codigo = 'BUJ-01';  -- t
+# @no-cookie-jar
+DELETE {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 78. Detalle de la bujia dada de baja
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+GET {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 79. Listado sin la bujia
+# Esperado: 200 con "total": 3 (filtro, pastillas, aceite)
+# @no-cookie-jar
+GET {{base}}/repuestos
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 80. Busqueda de la bujia dada de baja
+# Esperado: 200 con "total": 0
+# @no-cookie-jar
+GET {{base}}/repuestos?q=buj
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 81. Repetir la baja de la bujia
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+DELETE {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 82. PATCH de la bujia dada de baja
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+PATCH {{base}}/repuestos/{{altaBujia.response.body.$.id}}
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "descripcion": "x"
+}
+
+### 83. Alta con el codigo liberado por la baja
+# Esperado: 201 con un "id" distinto del de la bujia dada de baja, "precio": "4600.00", "stock": 2
+# psql: dos filas BUJ-01 (una con borrado_en) y un movimiento de la nueva:
+#   SELECT id, borrado_en IS NOT NULL FROM repuesto WHERE codigo = 'BUJ-01' ORDER BY id;  -- (3, t) y (<n>, f)
+#     (el id nuevo no es el 5: el 409 del caso 20 consumio un valor de la secuencia)
+#   SELECT cantidad FROM movimiento_stock WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'BUJ-01' AND borrado_en IS NULL);  -- 2
+# @name altaBujia2
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "BUJ-01",
+  "descripcion": "Bujía",
+  "precio": 4600,
+  "stock_inicial": 2
+}
+
+### 84. Busqueda de la bujia nueva
+# Esperado: 200 con 1 item (la nueva, "stock": 2), "total": 1
+# @no-cookie-jar
+GET {{base}}/repuestos?q=buj
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 85. DELETE de las pastillas (con stock 4)
+# Esperado: 204 sin cuerpo (S-11: la baja se acepta con stock)
+# psql: conservan stock y movimiento:
+#   SELECT stock, borrado_en IS NOT NULL FROM repuesto WHERE codigo = 'PAS-FRE-DEL';  -- 4 | t
+#   SELECT count(*) FROM movimiento_stock WHERE repuesto_id = (SELECT id FROM repuesto WHERE codigo = 'PAS-FRE-DEL');  -- 1
+# @no-cookie-jar
+DELETE {{base}}/repuestos/{{altaPastillas.response.body.$.id}}
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 86. DELETE de un repuesto inexistente
+# Esperado: 404 {"detail": "El repuesto no existe"}
+# @no-cookie-jar
+DELETE {{base}}/repuestos/999999
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 87. DELETE con id no numerico
+# Esperado: 422 sobre ["path", "repuesto_id"]
+# @no-cookie-jar
+DELETE {{base}}/repuestos/abc
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 88. Listado final
+# Esperado: 200 con "total": 3 (filtro, aceite, bujia nueva)
+# @no-cookie-jar
+GET {{base}}/repuestos
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# G. Invariantes (psql, spec stock-movements) -- no son peticiones HTTP
+# =============================================================================
+
+### 89. stock = suma de movimientos para todos los repuestos
+# psql:
+#   SELECT r.codigo, r.stock, COALESCE(SUM(m.cantidad), 0) AS suma
+#     FROM repuesto r LEFT JOIN movimiento_stock m ON m.repuesto_id = r.id
+#     GROUP BY r.id ORDER BY r.id;
+# Esperado: 5 filas con stock igual a la suma: FIL-ACE-01 10, PAS-FRE-DEL 4, BUJ-01 0 (la dada de baja),
+#   ACE-5W30-1L 0, BUJ-01 2 (la nueva).
+# (No hay peticion HTTP: la consulta se corre en psql.)
+
+### 90. Movimientos de stock: solo "Stock inicial" de jefa
+# psql:
+#   SELECT repuesto_id, cantidad, motivo, orden_id, usuario_id FROM movimiento_stock ORDER BY id;
+# Esperado: exactamente 3 filas (cantidades 10, 4 y 2), todas con motivo "Stock inicial",
+#   orden_id NULL y usuario_id = id de jefa. Ninguna por los rechazos (403, 409, 422) ni por el 0 del caso 19.
+
+### 91. Historial de precios: solo las dos lineas del filtro
+# psql:
+#   SELECT precio_anterior, precio_nuevo, usuario_id FROM historial_precio_repuesto ORDER BY id;
+# Esperado: exactamente 2 lineas del filtro: 8500.00 -> 9000.00 y 9000.00 -> 9500.50, usuario_id = id de jefa.
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP; script temporal no versionado
+# `verificar_c11.py`, design D12 bloques a-j)
+# =============================================================================
+# - Punto unico de escritura de stock: dos salidas simultaneas de 3 sobre stock 5 (una confirma, la otra
+#   Stock insuficiente "hay 2 y se necesitan 3", stock 2, un movimiento -3); entradas simultaneas +4/+6;
+#   pedidos cruzados [A,B] contra [B,A] sin interbloqueo (nunca 40P01); rechazo atomico de varios
+#   pedidos; ValueError de programacion; incluir_bajas; repuesto inexistente.
+# - Atomicidad del alta (si falla el movimiento no queda el repuesto) y del PATCH (si falla el historial
+#   no cambia el precio).
+# - Carreras: dos POST del mismo codigo (201 + 409), dos PATCH de precio (historial encadenado), dos DELETE
+#   (204 + 404).
+# - Consultas emitidas por GET /repuestos?q=... (2 de autorizacion + conteo + pagina; q como parametro
+#   ligado) y size=500 sin consultar repuesto.
+# - /openapi.json sin borrado_en en las respuestas de /repuestos; alta sin stock; PATCH solo con
+#   descripcion y precio.
+# - Invariante stock = COALESCE(SUM(cantidad), 0) para todos los repuestos del script.

@@ -33,7 +33,7 @@
 **Decisión:** simulado, en el mismo proceso, sólo tras commit. **Riesgo aceptado:** se pierde si el proceso se reinicia; sin reintento (se resuelve en cap. 8).
 
 ### DD-11 — Concurrencia diferida
-**Decisión:** no se protege la actualización perdida de stock (cap. 7). **Riesgo aceptado:** dos órdenes simultáneas pueden descontar sobre el mismo valor leído; el CHECK evita negativos pero no la sobreentrega.
+**Decisión:** la consigna no evalúa concurrencia (cap. 7), pero la actualización perdida de stock **queda evitada** (C-11, S-02): el punto único de escritura aplica cada movimiento con un `UPDATE` atómico condicional (`stock + :delta >= 0 … RETURNING`), en orden ascendente de `repuesto_id`, sin bloqueo explícito ni reintentos. Dos órdenes simultáneas no descuentan sobre el mismo valor leído; si el stock no alcanza, 409 propio y rollback total. *(Antes: se aceptaba la actualización perdida.)*
 
 ## Supuestos inferidos
 
