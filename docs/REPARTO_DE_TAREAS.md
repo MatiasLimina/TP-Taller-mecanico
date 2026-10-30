@@ -32,7 +32,7 @@ C-01 a C-09 ya están cerrados.
 | C-03 | domain-models-migration | CRITICO | Mati | Mati | ✓ |
 | C-04 | append-only-trigger-migration | ALTO | Mati | Mati | ✓ |
 | C-05 | security-core | CRITICO | Lauti | Lauti | ✓ |
-| C-06 | seed-script | MEDIO | Mati | **Lauti** | propuesto |
+| C-06 | seed-script | MEDIO | Mati | **Lauti** | ✓ |
 | C-07 | auth-registro-login | CRITICO | Mati | Mati | ✓ |
 | C-08 | auth-session-guards | CRITICO | Mati | Mati | ✓ |
 | C-09 | roles-personal-eventos | CRITICO | Mati | Mati | ✓ |
@@ -48,7 +48,7 @@ C-01 a C-09 ya están cerrados.
 |------------|----------------------|--------------------|-------------------------------|
 | **Mati** | — | — | ALTO (ya hizo los CRITICO de auth) |
 | **Nico** | C-10…C-16 | C-14 | CRITICO (C-14, con revisión de Mati) |
-| **Lauti** | — | C-06, C-15, C-16 | MEDIO |
+| **Lauti** | — | C-15, C-16 | MEDIO |
 
 ## 4. Detalle por integrante (lo que falta)
 

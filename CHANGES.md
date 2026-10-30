@@ -59,7 +59,7 @@ GATE 1: C-02 ✓
 GATE 2: C-03 ✓                          ← FORK
   → C-04 append-only-trigger-migration  [hecho]
   → C-07 auth-registro-login            [hecho]
-  → C-06 seed-script                    [propuesto — si C-04 ✓ y C-05 ✓]
+  → C-06 seed-script                    [hecho]
   → C-16 (sólo casos .http por adelantado, desde la matriz de 03_actores_y_roles.md)
 
 GATE 3: C-07 ✓
@@ -194,7 +194,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/10_preguntas_abiertas.md` IN-03
 
 ### [C-06] `seed-script`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `seed.py` idempotente: vacía las tablas y carga el estado inicial, el catálogo `estado_orden` primero (PENDIENTE 1, EN_REPARACION 2, TERMINADA 3 final, CANCELADA 4 final)
   - Usuarios: `admin@`, `admin2@` (ADMIN), `recepcion@`, `mecanico@`, `mecanico2@`, `cliente@`, `nuevo@` (MECANICO con `debe_cambiar_password`), contraseñas de mentira sólo en `seed.py`
@@ -383,6 +383,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - Verificación end-to-end de la matriz RBAC (401 vs 403, 404, 409, 422, 429) contra el seed
   - `README.md`: pasos desde cero (venv, `pip install`, `.env` con clave generada con `secrets.token_urlsafe`, `alembic upgrade head`, `python seed.py`, `uvicorn main:app`); integrantes
   - Chequeo de condición bloqueante: `alembic upgrade head` sobre base vacía, ciclo `upgrade/downgrade/upgrade`, sin credenciales reales en el repo (revisar `.gitignore`, `env.example`, `alembic.ini`)
+  - **Heredado de C-06**: el `README.md` documenta `python seed.py` en la puesta en marcha y advierte que borra todos los datos del dominio.
 - **Dependencias**: `C-06, C-09, C-14, C-15`
 - **Governance**: BAJO
 - **Responsable**: `propose` Nico · `apply` Lauti (cierre); cada uno los `.http` de su módulo (ver REPARTO §6)
@@ -406,4 +407,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-30)**: C-01…C-05 y C-07…C-13 completados; C-06 propuesto; C-14 propuesto (en otra rama); próximo: C-14.
+**Estado (2026-10-30)**: C-01…C-13 completados; C-14 propuesto; próximo: C-14.
