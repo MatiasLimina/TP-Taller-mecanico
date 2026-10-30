@@ -28,6 +28,9 @@ from app.modules.repuestos.repository import (
     RepuestoRepository,
 )
 from app.modules.repuestos.schemas import (
+    MovimientoSalida,
+    PrecioHistorialSalida,
+    ReposicionEntrada,
     RepuestoAltaEntrada,
     RepuestoEdicionEntrada,
     RepuestoSalida,
@@ -239,3 +242,67 @@ async def baja(uow: RepuestosUoW, repuesto_id: int) -> None:
         if repuesto is None:
             raise NoEncontrado(MENSAJE_REPUESTO_INEXISTENTE)
         await uow.repuestos.soft_delete(repuesto)
+
+
+async def reponer(
+    uow: RepuestosUoW, repuesto_id: int, datos: ReposicionEntrada, usuario_id: int
+) -> RepuestoSalida:
+    """Reposición (RN14, C-12): entrada positiva por el PUNTO ÚNICO; nunca escribe stock por su cuenta.
+
+    Un solo `async with` (el punto único no abre otro). Primero el punto único y después la
+    lectura: el 404 (inexistente o dado de baja, `incluir_bajas=False`) lo decide un solo lugar,
+    y la lectura posterior encuentra la fila vigente porque el `UPDATE` la dejó bloqueada hasta
+    el commit (una baja simultánea espera). La salida lleva el stock DEVUELTO por el punto único,
+    no `repuesto.stock`. No se captura nada dentro del bloque: `NoEncontrado` sale y el UoW
+    revierte. `StockInsuficiente` es imposible con delta positivo.
+    """
+    async with uow:
+        stock = (
+            await aplicar_movimientos_stock(
+                uow,
+                [MovimientoPedido(repuesto_id, datos.cantidad, datos.motivo)],
+                usuario_id=usuario_id,
+            )
+        )[repuesto_id]
+        repuesto = await uow.repuestos.get_by_id(repuesto_id)
+        if repuesto is None:  # defensivo: inalcanzable, la fila quedó bloqueada por el UPDATE
+            raise NoEncontrado(MENSAJE_REPUESTO_INEXISTENTE)
+        salida = RepuestoSalida(
+            id=repuesto_id,
+            codigo=repuesto.codigo,
+            descripcion=repuesto.descripcion,
+            precio=repuesto.precio,
+            stock=stock,
+        )
+    return salida
+
+
+async def _exigir_vigente(uow: RepuestosUoW, repuesto_id: int) -> None:
+    """404 si el repuesto no existe o está dado de baja (S-07): lo mismo que `detalle`."""
+    if await uow.repuestos.get_by_id(repuesto_id) is None:
+        raise NoEncontrado(MENSAJE_REPUESTO_INEXISTENTE)
+
+
+async def listar_movimientos(uow: RepuestosUoW, repuesto_id: int) -> list[MovimientoSalida]:
+    """Movimientos de un repuesto vigente, completos y en orden de registro (S-05, S-06, S-07).
+
+    La existencia se verifica aparte para distinguir 404 de 200 `[]`. Cantidad fija de consultas
+    (existencia + lista), sin relaciones: no hay N+1 ni carga perezosa. Salida dentro del bloque.
+    """
+    async with uow:
+        await _exigir_vigente(uow, repuesto_id)
+        movimientos = await uow.movimientos.listar_de_repuesto(repuesto_id)
+        salida = [MovimientoSalida.model_validate(m) for m in movimientos]
+    return salida
+
+
+async def listar_precios(uow: RepuestosUoW, repuesto_id: int) -> list[PrecioHistorialSalida]:
+    """Historial de precios de un repuesto vigente (RN20), completo y en orden de registro.
+
+    La línea la escribe `editar` (C-11); acá sólo se lee. Mismas reglas que `listar_movimientos`.
+    """
+    async with uow:
+        await _exigir_vigente(uow, repuesto_id)
+        lineas = await uow.historial_precios.listar_de_repuesto(repuesto_id)
+        salida = [PrecioHistorialSalida.model_validate(linea) for linea in lineas]
+    return salida

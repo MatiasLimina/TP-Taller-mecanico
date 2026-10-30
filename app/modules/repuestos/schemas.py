@@ -19,8 +19,21 @@ fijar por el alta ni por el PATCH: RN14, el stock sólo cambia por el punto úni
 
 Salida (hereda `SalidaBase`): exactamente `id`, `codigo`, `descripcion`, `precio` y `stock`.
 `borrado_en` nunca se expone.
+
+C-12 (reposición y historiales), supuestos confirmados:
+
+- S-01: `reponer` responde 200 con `RepuestoSalida` (el stock resultante), no con el movimiento.
+- S-02: `cantidad` de la reposición es un entero de 1 a 100 000 (`CANTIDAD_MAXIMA_MOVIMIENTO`), en
+  modo laxo como `stock_inicial`. Siempre positiva: las salidas de stock son de C-14.
+- S-03: `motivo` es opcional, por defecto «Reposición»; si viene se recorta y debe quedar con 1 a
+  200 caracteres; `null` es 422. `stock` u `orden_id` en el cuerpo son 422 (`extra="forbid"`).
+- S-08: `MovimientoSalida` = `id`, `cantidad` (con signo), `motivo`, `orden_id`, `usuario_id` y
+  `cuando`. Sin `repuesto_id` (está en la ruta) ni correo del actor (es de otro módulo).
+- S-09: `PrecioHistorialSalida` = `id`, `precio_anterior`, `precio_nuevo` (texto `"8500.00"`),
+  `usuario_id` y `cuando`.
 """
 
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated
 
@@ -37,6 +50,8 @@ from app.core.schemas import EntradaBase, SalidaBase
 LARGO_MAXIMO_CODIGO = 30
 LARGO_MAXIMO_DESCRIPCION = 200
 LARGO_MAXIMO_BUSQUEDA = 100
+LARGO_MAXIMO_MOTIVO = 200
+MOTIVO_REPOSICION = "Reposición"  # motivo por defecto del movimiento de reposición
 CANTIDAD_MAXIMA_MOVIMIENTO = 100_000  # tope por movimiento; C-12 lo reutiliza en `reponer`
 PATRON_CODIGO = r"^[A-Z0-9]+(-[A-Z0-9]+)*$"  # FIL-ACE-01, BUJ-01, ACE-5W30-1L, FRE-010
 CENTAVO = Decimal("0.01")
@@ -65,6 +80,11 @@ Precio = Annotated[
     Decimal, Field(gt=0, max_digits=10, decimal_places=2), AfterValidator(_a_centavos)
 ]
 CantidadInicial = Annotated[int, Field(ge=0, le=CANTIDAD_MAXIMA_MOVIMIENTO)]
+CantidadReposicion = Annotated[int, Field(ge=1, le=CANTIDAD_MAXIMA_MOVIMIENTO)]
+Motivo = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=LARGO_MAXIMO_MOTIVO),
+]
 
 
 class RepuestoAltaEntrada(EntradaBase):
@@ -94,3 +114,25 @@ class RepuestoSalida(SalidaBase):
     descripcion: str
     precio: Decimal  # Pydantic v2 lo serializa como texto: "8500.00"
     stock: int
+
+
+class ReposicionEntrada(EntradaBase):
+    cantidad: CantidadReposicion
+    motivo: Motivo = MOTIVO_REPOSICION  # ausente -> "Reposición"; null -> 422 (str no admite None)
+
+
+class MovimientoSalida(SalidaBase):
+    id: int
+    cantidad: int  # con signo: positivo entra, negativo sale (C-14)
+    motivo: str
+    orden_id: int | None
+    usuario_id: int
+    cuando: datetime  # timestamptz -> ISO 8601 con zona
+
+
+class PrecioHistorialSalida(SalidaBase):
+    id: int
+    precio_anterior: Decimal  # "8500.00" (NUMERIC(10, 2))
+    precio_nuevo: Decimal
+    usuario_id: int
+    cuando: datetime
