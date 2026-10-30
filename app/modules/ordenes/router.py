@@ -33,7 +33,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from app.core.dependencies import requiere_rol
+from app.core.dependencies import UsuarioActualDep, requiere_rol
 from app.core.schemas import IdRuta
 from app.modules.ordenes import service
 from app.modules.ordenes.schemas import (
@@ -71,3 +71,10 @@ async def iniciar(
     orden_id: IdRuta, actual: IniciarOrdenDep, uow: OrdenesUoWDep
 ) -> OrdenDetalleSalida:
     return await service.iniciar(uow, orden_id, actual.id)
+
+
+@router_ordenes.post("/{orden_id}/cancelar", status_code=200)
+async def cancelar(
+    orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep
+) -> OrdenDetalleSalida:
+    return await service.cancelar(uow, orden_id, actual.id)

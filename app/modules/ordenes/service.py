@@ -38,6 +38,7 @@ from app.core.errores import (
     Conflicto,
     EntradaInvalida,
     NoEncontrado,
+    SinPermiso,
     restriccion_violada,
 )
 from app.modules.ordenes.models import (
@@ -339,6 +340,32 @@ async def iniciar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetal
             salida = await _aplicar_transicion(
                 uow, orden, destino, usuario_id, mecanico_id=usuario_id
             )
+    except IntegrityError as exc:
+        _traducir_catalogo(exc, destino)
+        raise
+    return salida
+
+
+async def cancelar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetalleSalida:
+    """PENDIENTE -> CANCELADA por la recepción, la administración o el dueño del vehículo (RN12).
+
+    Orden de los rechazos: 404 (orden inexistente) -> 403 (ni RECEPCION/ADMIN vigente, ni dueño;
+    S-07, antes que el estado, RN12) -> 409 (estado). El dueño es el usuario de la ficha del
+    cliente del vehículo, también si el vehículo está dado de baja (S-08); una ficha sin usuario no
+    tiene dueño que cancele. Cancelar no mueve stock (el alta nunca lo descontó, RN14) y no toca
+    `mecanico_id`.
+    """
+    destino = CodigoEstado.CANCELADA
+    try:
+        async with uow:
+            orden = await _bloquear_orden(uow, orden_id)  # paso 1 — 404
+            roles = await _roles_vigentes(uow, usuario_id)
+            es_personal = not roles.isdisjoint(ROLES_QUE_CANCELAN)
+            # el personal no necesita más consultas; el resto tiene que ser el dueño
+            if not es_personal and await uow.ordenes.get_usuario_dueno(orden_id) != usuario_id:
+                raise SinPermiso(MENSAJE_SIN_PERMISO_CANCELAR)  # 403 antes que 409
+            await _exigir_transicion(uow, orden, destino)  # 409
+            salida = await _aplicar_transicion(uow, orden, destino, usuario_id)
     except IntegrityError as exc:
         _traducir_catalogo(exc, destino)
         raise
