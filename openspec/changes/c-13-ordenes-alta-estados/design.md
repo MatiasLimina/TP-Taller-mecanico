@@ -350,7 +350,7 @@ Sin cambios de esquema ni de datos. Despliegue: archivos nuevos del módulo, el 
 
 ## Open Questions / Supuestos
 
-Todos los supuestos fueron **confirmados por el usuario el 2026-10-30**, cada uno con la recomendación indicada; S-01 además necesita el acuerdo de Mati (pendiente). Cada uno con opciones, recomendación y por qué.
+Todos los supuestos fueron **confirmados por el usuario el 2026-10-30**, cada uno con la recomendación indicada; S-01 cuenta además con el acuerdo de Mati (2026-10-30). Cada uno con opciones, recomendación y por qué.
 
 - **S-01 — Dónde vive la lectura `FOR SHARE` de repuestos.** Opciones: (A) `RepuestoRepository.listar_vigentes_para_orden(ids)` en `repuestos/repository.py`, coordinado con Mati (lo que dejó anotado C-11); (B) `RepuestoParaOrdenRepository` en `ordenes/repository.py` sobre el modelo `Repuesto` (precedente: C-10 S-01 puso la consulta de órdenes abiertas en `clientes` para no tocar el archivo de otro); (C) un `get_vigente_para_actualizar` por repuesto (N consultas y `FOR UPDATE`: serializa altas que comparten repuestos). **Recomendado A**: la pregunta es del catálogo («¿qué repuestos vigentes son estos?»), queda junto a los otros bloqueos de `repuesto` y su orden, y es lo acordado en C-11; B si Mati prefiere no tocar su archivo; C descartada (N+1 y bloqueo exclusivo).
 - **S-02 — Bloqueo del vehículo.** Opciones: (A) reutilizar `VehiculoRepository.get_vigente_para_actualizar` (`FOR UPDATE`) dentro del `OrdenesUoW`; (B) método nuevo con `FOR SHARE` en `clientes/repository.py`; (C) sin bloqueo (la FK no espera a una baja lógica: quedaría una orden abierta sobre un vehículo dado de baja). **Recomendado A**: cumple el contrato de C-10 sin tocar `clientes`; el costo es serializar altas del mismo vehículo.
