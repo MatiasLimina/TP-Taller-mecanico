@@ -67,12 +67,12 @@ GATE 3: C-07 ✓
 
 GATE 4: C-08 ✓                          ← FORK
   → C-09 roles-personal-eventos         [hecho]
-  → C-10 clientes-vehiculos
-  → C-11 repuestos-catalogo
+  → C-10 clientes-vehiculos            [hecho]
+  → C-11 repuestos-catalogo            [hecho]
 
 GATE 5: C-11 ✓
-  → C-12 repuestos-stock-precios
-  → C-13 ordenes-alta-estados           [si C-10 ✓ además]
+  → C-12 repuestos-stock-precios        [hecho]
+  → C-13 ordenes-alta-estados           [hecho]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
   → C-14 ordenes-transiciones
@@ -272,7 +272,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 > C-10 y C-11 (y luego C-12) son independientes entre sí; corren en paralelo tras C-08.
 
 ### [C-10] `clientes-vehiculos`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `clientes` (+ `Vehiculo`, `SoftDeleteRepository`): `POST /clientes` (RECEPCION, ADMIN; documento repetido → 409), `GET /clientes/{id}` con vehículos (eager loading), `POST /clientes/{id}/vehiculos` (patente vigente repetida → 409; `anio` 1950-2100)
   - `DELETE /vehiculos/{id}` → 204 baja lógica; 409 si tiene órdenes abiertas (estado no final según `es_final`, RN16); patente reutilizable tras la baja
@@ -288,7 +288,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/03_actores_y_roles.md` §RBAC (rutas /clientes, /vehiculos)
 
 ### [C-11] `repuestos-catalogo`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `repuestos` (+ `SoftDeleteRepository`): `GET /repuestos?q&page&size` (ADMIN, RECEPCION, MECANICO; búsqueda con parámetros ligados, `' OR '1'='1` → lista vacía; paginado), `GET /repuestos/{id}`
   - `POST /repuestos` (ADMIN) con `stock_inicial` que genera `movimiento_stock` "Stock inicial" (cantidad positiva) en el mismo UoW; código vigente repetido → 409
@@ -304,11 +304,12 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/03_actores_y_roles.md` §RBAC (rutas /repuestos)
 
 ### [C-12] `repuestos-stock-precios`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `POST /repuestos/{id}/reponer` (ADMIN): suma stock y registra `movimiento_stock` (cantidad positiva, motivo) en una transacción; cantidad inválida → 422
   - `GET /repuestos/{id}/movimientos` (ADMIN), `GET /repuestos/{id}/precios` (ADMIN, historial)
-  - Extensión del `PATCH` de C-11: si el precio cambia, agrega `historial_precio_repuesto` (anterior/nuevo) en el mismo UoW; PATCH sólo de descripción no crea línea; RECEPCION → 403 (RN20). Caso PDF C18
+  - Caso PDF C18: sólo la lectura de `/precios`. El historial en el `PATCH` (RN20) ya lo escribe C-11 (S-03): C-12 **no** toca `editar()`
+  - `reponer` usa el punto único `aplicar_movimientos_stock` de C-11 (ver «Notas para otros changes» en su design)
   - `movimiento_stock.cantidad` con signo: entradas positivas, salidas negativas
 - **Dependencias**: `C-11`
 - **Governance**: ALTO (stock y precios; historiales de sólo agregado)
@@ -324,7 +325,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 ## FASE 5 — Órdenes de trabajo
 
 ### [C-13] `ordenes-alta-estados`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `ordenes` (+ `EstadoOrden`, `ItemOrden`, `HistorialEstadoOrden`); `EstadoOrdenRepository` de sólo lectura (no hereda de `BaseRepository`, PK `codigo`)
   - `POST /ordenes` (RECEPCION, ADMIN): cuerpo `{vehiculo_id, falla, items[{repuesto_id, cantidad}]}` sin precio/total/estado/fecha (DTO `extra="forbid"`); ≥ 1 ítem y sin repuestos repetidos; UoW: verifica catálogo no vacío (409 propio), vehículo vigente, repuestos vigentes; copia `precio_unitario`; calcula `total` en servidor; orden PENDIENTE + ítems + historial `null → PENDIENTE`; repuesto inexistente/baja → 409 y no queda orden (RN10, RN19). Caso PDF C10
@@ -359,7 +360,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 - **Estado**: `[ ]` pendiente
 - **Scope**:
   - `GET /ordenes?estado&page&size` (personal; estado inválido → 422; `total` con los mismos filtros)
-  - `GET /ordenes/{id}` (personal o dueño del vehículo; 403/404): vehículo, cliente, ítems, repuesto e historial con `selectinload`/`joinedload` dentro del repositorio; número fijo de consultas (2 vs 4 ítems → mismas consultas). Evidencia caso PDF C15 (log con `SQL_ECHO=true`)
+  - `GET /ordenes/{id}`: **reutiliza `OrdenTrabajoRepository.get_detalle` y `service.armar_detalle` de C-13** (precarga con `selectinload`/`joinedload` ya hecha ahí) y agrega el permiso (personal o dueño, 403/404) y la evidencia del caso PDF C15: número fijo de consultas (2 vs 4 ítems → mismas consultas; log con `SQL_ECHO=true`)
   - `GET /mis-ordenes?page&size` (autenticado, sólo órdenes de sus vehículos, RN17). Caso PDF C17
   - Sin carga perezosa ni llamadas bloqueantes en handlers (Ej.8)
 - **Dependencias**: `C-13`
@@ -406,4 +407,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-30)**: C-01…C-09 completados; próximos `propose`: C-10 y C-11.
+**Estado (2026-10-30)**: C-01…C-13 completados; C-14 propuesto; próximo: C-14.

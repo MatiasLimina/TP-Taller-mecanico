@@ -1,0 +1,831 @@
+# =============================================================================
+# test/clientes.http -- Casos de C-10 clientes-vehiculos
+#   (POST /clientes, GET /clientes/{id}, POST /clientes/{id}/vehiculos,
+#    DELETE /vehiculos/{id}, GET /mis-vehiculos)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada seccion).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision):
+#
+#   DELETE FROM orden_trabajo WHERE vehiculo_id IN (SELECT id FROM vehiculo WHERE patente LIKE 'ZC%');
+#   DELETE FROM vehiculo WHERE patente LIKE 'ZC%';
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@clientes.example.com';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@clientes.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN (SELECT id FROM usuario WHERE email LIKE '%@clientes.example.com');
+#   DELETE FROM cliente WHERE documento LIKE '430000%' OR usuario_id IN (SELECT id FROM usuario WHERE email LIKE '%@clientes.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@clientes.example.com';
+#   -- catalogo de estados (C-06 todavia no existe; si ya esta cargado no cambia nada):
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('PENDIENTE', 'Pendiente', 1, false), ('EN_REPARACION', 'En reparación', 2, false),
+#     ('TERMINADA', 'Terminada', 3, true), ('CANCELADA', 'Cancelada', 4, true)
+#   ON CONFLICT DO NOTHING;
+#
+# Correos @clientes.example.com, documentos 430000xx, patentes ZC...; archivo de una
+# sola pasada; si C-06 ya existe, `python seed.py` antes y despues este bloque.
+# Reutilizar una sesion: `Cookie: {{loginRecepcion.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`).
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de recepcion@clientes.example.com
+# Esperado: 201
+# @name registroRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "recepcion@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Rita Recepcion",
+  "documento": "43000001",
+  "telefono": "1143000001"
+}
+
+### 2. Registro de admin@clientes.example.com
+# Esperado: 201
+# @name registroAdmin
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "admin@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Ada Admin",
+  "documento": "43000002",
+  "telefono": "1143000002"
+}
+
+### 3. Registro de duena@clientes.example.com
+# Esperado: 201 con cliente.id
+# @name registroDuena
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "duena@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Laura Duena",
+  "documento": "43000003",
+  "telefono": "1143000003"
+}
+
+### 4. Registro de otro@clientes.example.com
+# Esperado: 201
+# @name registroOtro
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "otro@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Oscar Otro",
+  "documento": "43000004",
+  "telefono": "1143000004"
+}
+
+### 5. Registro de mecanico@clientes.example.com
+# Esperado: 201
+# @name registroMecanico
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "mecanico@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Mario Mecanico",
+  "documento": "43000005",
+  "telefono": "1143000005"
+}
+
+### 6. Registro de pendiente@clientes.example.com
+# Esperado: 201
+# psql: Despues del 6, preparacion:
+# psql:   INSERT INTO asignacion_rol (usuario_id, rol) SELECT id, 'RECEPCION' FROM usuario WHERE email = 'recepcion@clientes.example.com';
+# psql:   INSERT INTO asignacion_rol (usuario_id, rol) SELECT id, 'ADMIN' FROM usuario WHERE email = 'admin@clientes.example.com';
+# psql:   INSERT INTO asignacion_rol (usuario_id, rol) SELECT id, 'MECANICO' FROM usuario WHERE email = 'mecanico@clientes.example.com';
+# psql:   DELETE FROM cliente WHERE usuario_id = (SELECT id FROM usuario WHERE email = 'mecanico@clientes.example.com');
+# psql:   UPDATE usuario SET debe_cambiar_password = true WHERE email = 'pendiente@clientes.example.com';
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "pendiente@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Pedro Pendiente",
+  "documento": "43000006",
+  "telefono": "1143000006"
+}
+
+### 7. Login de recepcion@clientes.example.com
+# Esperado: 200
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 8. Login de admin@clientes.example.com
+# Esperado: 200
+# @name loginAdmin
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 9. Login de duena@clientes.example.com
+# Esperado: 200
+# @name loginDuena
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "duena@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 10. Login de otro@clientes.example.com
+# Esperado: 200
+# @name loginOtro
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "otro@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 11. Login de mecanico@clientes.example.com
+# Esperado: 200
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 12. Login de pendiente@clientes.example.com
+# Esperado: 200 con debe_cambiar_password: true
+# @name loginPendiente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "pendiente@clientes.example.com",
+  "password": "ClaveSegura1"
+}
+
+# =============================================================================
+# B. Acceso
+# =============================================================================
+
+### 13. POST /clientes sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# psql: SELECT count(*) FROM cliente WHERE documento = '43000099' -- 0
+# @no-cookie-jar
+POST {{base}}/clientes
+Content-Type: application/json
+
+{
+  "nombre": "Ines Intrusa",
+  "documento": "43000099",
+  "telefono": "1100000099"
+}
+
+### 14. POST /clientes con loginDuena (solo CLIENTE)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# psql: SELECT count(*) FROM cliente WHERE documento = '43000099' -- 0
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Ines Intrusa",
+  "documento": "43000099",
+  "telefono": "1100000099"
+}
+
+### 15. POST /clientes con loginMecanico
+# Esperado: 403 con el mismo mensaje de permiso
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Ines Intrusa",
+  "documento": "43000099",
+  "telefono": "1100000099"
+}
+
+### 16. GET /clientes/{id} de su propia ficha con loginDuena (S-08)
+# Esperado: 403
+# @no-cookie-jar
+GET {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 17. POST /clientes/{id}/vehiculos con loginOtro
+# Esperado: 403
+# psql: SELECT count(*) FROM vehiculo WHERE patente = 'ZC099AA' -- 0
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginOtro.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC099AA",
+  "marca": "Ford",
+  "modelo": "Ka",
+  "anio": 2010
+}
+
+### 18. DELETE /vehiculos/999999 con loginDuena
+# Esperado: 403 (no 404)
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/999999
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 19. GET /mis-vehiculos sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+
+### 20. GET /mis-vehiculos con loginPendiente
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+
+### 21. POST /clientes con loginPendiente
+# Esperado: 403 con el mensaje del cambio pendiente (no el de permiso)
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Ines Intrusa",
+  "documento": "43000099",
+  "telefono": "1100000099"
+}
+
+### 22. DELETE /vehiculos/abc sin cookie
+# Esperado: 401 (no 422)
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/abc
+
+# =============================================================================
+# C. Alta de fichas
+# =============================================================================
+
+### 23. usuario_id en el cuerpo
+# Esperado: 422 extra_forbidden sobre usuario_id
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "X",
+  "documento": "43000098",
+  "telefono": "1",
+  "usuario_id": 1
+}
+
+### 24. documento en blanco
+# Esperado: 422 sobre documento
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "X",
+  "documento": "   ",
+  "telefono": "1"
+}
+
+### 25. documento de 21 caracteres
+# Esperado: 422 sobre documento
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "X",
+  "documento": "123456789012345678901",
+  "telefono": "1"
+}
+
+### 26. sin telefono
+# Esperado: 422 missing sobre telefono
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "X",
+  "documento": "43000098"
+}
+
+### 27. Alta de Jorge (recorta espacios)
+# Esperado: 201 {id, usuario_id: null, nombre: "Jorge Sinusuario", documento: "43000010", telefono: "1155550010"} sin vehiculos
+# psql: SELECT nombre, documento, telefono, usuario_id FROM cliente WHERE documento = '43000010' -- usuario_id nulo
+# @name altaJorge
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": " Jorge Sinusuario ",
+  "documento": " 43000010 ",
+  "telefono": " 1155550010 "
+}
+
+### 28. Documento repetido con loginAdmin
+# Esperado: 409 El documento ya pertenece a un cliente del taller
+# psql: SELECT count(*) FROM cliente WHERE documento = '43000010' -- 1
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Otro Jorge",
+  "documento": "43000010",
+  "telefono": "1"
+}
+
+### 29. Documento de una ficha auto-registrada (duena)
+# Esperado: 409 el mismo mensaje
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Otra Laura",
+  "documento": "43000003",
+  "telefono": "1"
+}
+
+### 30. Alta de Ana con loginAdmin (ADMIN sin RECEPCION)
+# Esperado: 201
+# @name altaAna
+# @no-cookie-jar
+POST {{base}}/clientes
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "nombre": "Ana Alta",
+  "documento": "43000011",
+  "telefono": "1155550011"
+}
+
+### 31. Registro con el documento de la ficha de Jorge (RN02)
+# Esperado: 409 El documento ya pertenece a un cliente del taller
+# psql: no existe el usuario jorge@clientes.example.com; la ficha 43000010 sigue con usuario_id nulo
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jorge@clientes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Jorge",
+  "documento": "43000010",
+  "telefono": "1155550010"
+}
+
+# =============================================================================
+# D. Detalle de una ficha
+# =============================================================================
+
+### 32. GET /clientes/{Jorge}
+# Esperado: 200 {id, usuario_id: null, nombre: "Jorge Sinusuario", documento: "43000010", telefono: "1155550010", vehiculos: []}
+# @no-cookie-jar
+GET {{base}}/clientes/{{altaJorge.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 33. GET /clientes/999999
+# Esperado: 404 El cliente no existe
+# @no-cookie-jar
+GET {{base}}/clientes/999999
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 34. GET /clientes/abc
+# Esperado: 422
+# @no-cookie-jar
+GET {{base}}/clientes/abc
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 35. GET /clientes/0
+# Esperado: 422
+# @no-cookie-jar
+GET {{base}}/clientes/0
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# E. Alta de vehiculos
+# =============================================================================
+
+### 36. Vehiculo de Jorge (normaliza patente, recorta marca y modelo)
+# Esperado: 201 {id, cliente_id: <Jorge>, patente: "ZC001AA", marca: "Ford", modelo: "Fiesta", anio: 2015} sin borrado_en
+# @name vehJorge1
+# @no-cookie-jar
+POST {{base}}/clientes/{{altaJorge.response.body.$.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": " zc001aa ",
+  "marca": " Ford ",
+  "modelo": " Fiesta ",
+  "anio": 2015
+}
+
+### 37. Patente repetida en otra ficha
+# Esperado: 409 Ya hay un vehículo vigente con la patente ZC001AA
+# psql: SELECT count(*) FROM vehiculo WHERE patente = 'ZC001AA' AND borrado_en IS NULL -- 1
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC001AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001
+}
+
+### 38. Patente con espacio y guion (misma patente)
+# Esperado: 409 el mismo mensaje
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "zc-001 aa",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001
+}
+
+### 39. anio 1949
+# Esperado: 422 sobre anio
+# psql: ningun vehiculo nuevo
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC009AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 1949
+}
+
+### 40. anio 2101
+# Esperado: 422 sobre anio
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC009AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2101
+}
+
+### 41. Vehiculo de duena con anio 1950 (limite)
+# Esperado: 201
+# @name vehDuena1
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC002AA",
+  "marca": "Fiat",
+  "modelo": "Cronos",
+  "anio": 1950
+}
+
+### 42. Vehiculo de duena con anio 2100 (limite)
+# Esperado: 201
+# @name vehDuena2
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC003AA",
+  "marca": "Volkswagen",
+  "modelo": "Gol",
+  "anio": 2100
+}
+
+### 43. cliente_id en el cuerpo
+# Esperado: 422 extra_forbidden
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC009AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001,
+  "cliente_id": 1
+}
+
+### 44. Patente corta
+# Esperado: 422 sobre patente: La patente debe tener de 6 a 8 letras o dígitos, sin contar espacios ni guiones
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "AB",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001
+}
+
+### 45. Ficha inexistente
+# Esperado: 404 El cliente no existe
+# psql: SELECT count(*) FROM vehiculo WHERE patente = 'ZC009AA' -- 0
+# @no-cookie-jar
+POST {{base}}/clientes/999999/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC009AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001
+}
+
+### 46. Ficha inexistente con anio invalido
+# Esperado: 422 (contrato antes que existencia)
+# @no-cookie-jar
+POST {{base}}/clientes/999999/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC009AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 1900
+}
+
+### 47. Vehiculo de otro con loginAdmin
+# Esperado: 201
+# @name vehOtro
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroOtro.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC004AA",
+  "marca": "Renault",
+  "modelo": "Kangoo",
+  "anio": 2010
+}
+
+### 48. Segundo vehiculo de Jorge
+# Esperado: 201
+# @name vehJorge2
+# @no-cookie-jar
+POST {{base}}/clientes/{{altaJorge.response.body.$.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC005AA",
+  "marca": "Toyota",
+  "modelo": "Hilux",
+  "anio": 2020
+}
+
+# =============================================================================
+# F. Detalle con vehiculos
+# =============================================================================
+
+### 49. GET /clientes/{duena} con loginAdmin
+# Esperado: 200 con usuario_id = {{registroDuena.response.body.$.id}} y vehiculos [ZC002AA, ZC003AA] en orden de id
+# @no-cookie-jar
+GET {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 50. GET /clientes/{Jorge}
+# Esperado: 200 vehiculos [ZC001AA, ZC005AA]
+# @no-cookie-jar
+GET {{base}}/clientes/{{altaJorge.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# G. Lo propio (RN17)
+# =============================================================================
+
+### 51. GET /mis-vehiculos con loginDuena
+# Esperado: 200 [ZC002AA, ZC003AA] (arreglo, sin ZC004AA ni los de Jorge)
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 52. GET /mis-vehiculos con loginOtro
+# Esperado: 200 [ZC004AA]
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginOtro.response.headers.Set-Cookie}}
+
+### 53. GET /mis-vehiculos con loginMecanico (sin ficha)
+# Esperado: 200 []
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 54. GET /mis-vehiculos con loginRecepcion (ficha sin vehiculos)
+# Esperado: 200 []
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# H. Baja (RN16)
+# =============================================================================
+
+### 55. DELETE con orden PENDIENTE
+# Esperado: 409 El vehículo tiene órdenes abiertas y no se puede dar de baja
+# psql: antes: INSERT INTO orden_trabajo (vehiculo_id, estado, falla, total) SELECT id, 'PENDIENTE', 'Prueba C-10', 0 FROM vehiculo WHERE patente = 'ZC005AA' AND borrado_en IS NULL;
+# psql: despues: borrado_en de ZC005AA sigue nulo
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehJorge2.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 56. DELETE con orden EN_REPARACION
+# Esperado: 409 el mismo mensaje
+# psql: antes: UPDATE orden_trabajo SET estado = 'EN_REPARACION' WHERE vehiculo_id = (SELECT id FROM vehiculo WHERE patente = 'ZC005AA' AND borrado_en IS NULL);
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehJorge2.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 57. DELETE con orden TERMINADA
+# Esperado: 204 sin cuerpo
+# psql: antes: UPDATE orden_trabajo SET estado = 'TERMINADA' WHERE vehiculo_id = (SELECT id FROM vehiculo WHERE patente = 'ZC005AA' AND borrado_en IS NULL);
+# psql: despues: borrado_en no nulo y con zona; la orden sigue
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehJorge2.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 58. Segunda baja del mismo vehiculo
+# Esperado: 404 El vehículo no existe
+# psql: borrado_en no cambio
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehJorge2.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 59. DELETE con orden CANCELADA
+# Esperado: 204
+# psql: antes: INSERT INTO orden_trabajo (vehiculo_id, estado, falla, total) SELECT id, 'CANCELADA', 'Prueba C-10', 0 FROM vehiculo WHERE patente = 'ZC001AA' AND borrado_en IS NULL;
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehJorge1.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 60. GET /clientes/{Jorge} tras las bajas
+# Esperado: 200 con vehiculos: []
+# @no-cookie-jar
+GET {{base}}/clientes/{{altaJorge.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 61. DELETE /vehiculos/999999
+# Esperado: 404 El vehículo no existe
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/999999
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 62. DELETE /vehiculos/abc
+# Esperado: 422
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/abc
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 63. DELETE sin ordenes con loginAdmin (PDF C-19, primera parte)
+# Esperado: 204
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehDuena2.response.body.$.id}}
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 64. GET /mis-vehiculos con loginDuena tras la baja
+# Esperado: 200 [ZC002AA]
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 65. GET /clientes/{duena}
+# Esperado: 200 vehiculos [ZC002AA]
+# @no-cookie-jar
+GET {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# I. Patente reutilizable (PDF C-19)
+# =============================================================================
+
+### 66. Alta de ZC003AA en la ficha de otro
+# Esperado: 201
+# psql: SELECT id, cliente_id, borrado_en IS NOT NULL AS dado_de_baja FROM vehiculo WHERE patente = 'ZC003AA' ORDER BY id -- 2 filas: la primera de duena dada de baja, la segunda de otro vigente
+# @name vehOtroReusa
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroOtro.response.body.$.cliente.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC003AA",
+  "marca": "Chevrolet",
+  "modelo": "Onix",
+  "anio": 2018
+}
+
+### 67. ZC003AA en la ficha de Ana (ya vigente en otro)
+# Esperado: 409 Ya hay un vehículo vigente con la patente ZC003AA
+# @no-cookie-jar
+POST {{base}}/clientes/{{altaAna.response.body.$.id}}/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "ZC003AA",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2001
+}
+
+### 68. GET /mis-vehiculos con loginOtro
+# Esperado: 200 [ZC004AA, ZC003AA] (el nuevo id)
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginOtro.response.headers.Set-Cookie}}
+
+### 69. Cierre (solo psql)
+# Esperado: ver psql
+# psql: SELECT patente, borrado_en IS NOT NULL FROM vehiculo WHERE patente LIKE 'ZC%' ORDER BY id -- ZC001AA t, ZC002AA f, ZC003AA t, ZC004AA f, ZC005AA t, ZC003AA f
+# psql: SELECT count(*) FROM orden_trabajo WHERE falla = 'Prueba C-10' -- 2 (las ordenes se conservan)
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginOtro.response.headers.Set-Cookie}}
+
+# =============================================================================
+# Verificados por script (verificar_c10.py, tarea 5.1): consultas constantes del detalle,
+# documento y patente simultaneos, baja contra alta de orden concurrente, OpenAPI.
+#
+# Escenario -> caso: acceso 13-22; alta de ficha 23-31; detalle 32-35 y 49-50;
+# alta de vehiculo 36-48; /mis-vehiculos 19, 20, 51-54, 64, 68; baja 55-63, 65;
+# patente reutilizable 66-69.
+# =============================================================================

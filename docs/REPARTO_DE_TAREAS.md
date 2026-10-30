@@ -36,19 +36,19 @@ C-01 a C-09 ya están cerrados.
 | C-07 | auth-registro-login | CRITICO | Mati | Mati | ✓ |
 | C-08 | auth-session-guards | CRITICO | Mati | Mati | ✓ |
 | C-09 | roles-personal-eventos | CRITICO | Mati | Mati | ✓ |
-| C-10 | clientes-vehiculos | MEDIO | Nico | **Lauti** | pendiente |
-| C-11 | repuestos-catalogo | MEDIO | Nico | **Mati** | pendiente |
-| C-12 | repuestos-stock-precios | ALTO | Nico | **Mati** | pendiente |
-| C-13 | ordenes-alta-estados | ALTO | Nico | **Nico** (revisión de Mati) | pendiente |
+| C-10 | clientes-vehiculos | MEDIO | Nico | **Lauti** | ✓ |
+| C-11 | repuestos-catalogo | MEDIO | Nico | **Mati** | ✓ |
+| C-12 | repuestos-stock-precios | ALTO | Nico | **Mati** | ✓ |
+| C-13 | ordenes-alta-estados | ALTO | Nico | **Nico** (revisión de Mati) | ✓ |
 | C-14 | ordenes-transiciones | CRITICO | Nico | **Nico** (revisión de Mati) | pendiente |
 | C-15 | ordenes-lecturas-sin-n-plus-1 | MEDIO | Nico | **Lauti** | pendiente |
 | C-16 | verificacion-http-readme | BAJO | Nico | **Lauti** (cierre) + cada uno los `.http` de su módulo (ver §6) | pendiente |
 
 | Integrante | `propose` pendientes | `apply` pendientes | Governance máx. que implementa |
 |------------|----------------------|--------------------|-------------------------------|
-| **Mati** | — | C-11, C-12 | ALTO (ya hizo los CRITICO de auth) |
-| **Nico** | C-10…C-16 | C-13, C-14 | CRITICO (C-14, con revisión de Mati) |
-| **Lauti** | — | C-10, C-15, C-16 | MEDIO |
+| **Mati** | — | — | ALTO (ya hizo los CRITICO de auth) |
+| **Nico** | C-10…C-16 | C-14 | CRITICO (C-14, con revisión de Mati) |
+| **Lauti** | — | C-15, C-16 | MEDIO |
 
 ## 4. Detalle por integrante (lo que falta)
 

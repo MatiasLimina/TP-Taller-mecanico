@@ -33,7 +33,7 @@
 **Decisión:** simulado, en el mismo proceso, sólo tras commit. **Riesgo aceptado:** se pierde si el proceso se reinicia; sin reintento (se resuelve en cap. 8).
 
 ### DD-11 — Concurrencia diferida
-**Decisión:** no se protege la actualización perdida de stock (cap. 7). **Riesgo aceptado:** dos órdenes simultáneas pueden descontar sobre el mismo valor leído; el CHECK evita negativos pero no la sobreentrega.
+**Decisión:** la consigna no evalúa concurrencia (cap. 7), pero la actualización perdida de stock **queda evitada** (C-11, S-02): el punto único de escritura aplica cada movimiento con un `UPDATE` atómico condicional (`stock + :delta >= 0 … RETURNING`), en orden ascendente de `repuesto_id`, sin bloqueo explícito ni reintentos. Dos órdenes simultáneas no descuentan sobre el mismo valor leído; si el stock no alcanza, 409 propio y rollback total. *(Antes: se aceptaba la actualización perdida.)* El alta de órdenes (C-13) se serializa con la baja de vehículos y de repuestos por bloqueos de fila en un orden global (orden → vehículo → repuestos por id), sin interbloqueos.
 
 ## Supuestos inferidos
 
@@ -54,3 +54,9 @@ Token 1800 s, BCRYPT_COST 12, BCRYPT_MAX_CONCURRENCY 4, POOL_SIZE 5, MAX_OVERFLO
 
 ### SU-06 — Idioma
 **Supuesto:** mensajes de error y nombres de dominio en español (la consigna lo está), código en snake_case.
+
+### SU-07 — Historiales por repuesto sin paginar (C-12, S-05)
+**Supuesto:** `GET /repuestos/{id}/movimientos` y `GET /repuestos/{id}/precios` devuelven la lista completa, sin `page`/`size`. **Origen:** la consigna sólo pagina `/eventos`, `/repuestos`, `/ordenes` y `/mis-ordenes`. **Riesgo:** respuestas grandes en un repuesto muy usado (en un taller, decenas de filas). **Validar:** si creciera, agregar paginación sin romper la ruta.
+
+### SU-08 — Orden cronológico de los historiales (C-12, S-06)
+**Supuesto:** los historiales van por `id` ascendente (el más antiguo primero): la suma de movimientos llega al stock actual y las líneas de precio quedan encadenadas `anterior → nuevo`. **Origen:** lectura de libro de movimientos. **Riesgo:** ninguno funcional; distinto orden que `/eventos`.
