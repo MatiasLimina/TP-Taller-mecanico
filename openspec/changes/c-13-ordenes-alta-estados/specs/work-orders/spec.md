@@ -7,7 +7,7 @@ Define el ciclo de vida de una orden de trabajo del taller. Este change cubre el
 ## ADDED Requirements
 
 ### Requirement: Alta de orden sólo por recepción o administración
-`POST /ordenes` SHALL estar en el grupo protegido y aceptarse sólo para usuarios con rol vigente RECEPCION o ADMIN. Sin sesión → 401; con cambio de contraseña pendiente → 403; sin esos roles (CLIENTE, MECANICO) → 403 `No tiene permiso para realizar esta operación`. Estos rechazos MUST producirse antes de validar el cuerpo y sin escribir nada.
+`POST /ordenes` SHALL estar en el grupo protegido y aceptarse sólo para usuarios con rol vigente RECEPCION o ADMIN. Sin sesión → 401; con cambio de contraseña pendiente → 403; sin esos roles (CLIENTE, MECANICO) → 403 `No tiene permiso para realizar esta operación`. Estos rechazos MUST producirse antes de validar el cuerpo y sin escribir nada, salvo un JSON mal formado, que FastAPI rechaza con 422 antes de resolver la sesión.
 
 #### Scenario: Recepción abre una orden
 - **WHEN** un usuario con rol RECEPCION envía un alta válida
@@ -122,6 +122,10 @@ Cada ítem SHALL guardar como `precio_unitario` el precio vigente del repuesto e
 #### Scenario: Total fuera de rango
 - **WHEN** un ítem pide 1000 unidades de un repuesto de precio 99999999.99
 - **THEN** la respuesta es 422 con el mensaje del máximo y no se crea la orden, nunca 500
+
+#### Scenario: Total fuera de rango con vehículo inválido
+- **WHEN** el pedido tiene un total que supera el máximo y además un vehículo inexistente o dado de baja
+- **THEN** la respuesta es el 409 del vehículo: el 422 del total se evalúa después de las comprobaciones de vehículo y repuestos, y su `detail` es un texto, no la lista por campo de los 422 de contrato
 
 ### Requirement: Estado inicial, mecánico e historial
 Una orden aceptada SHALL nacer en estado `PENDIENTE`, sin mecánico (`mecanico_id` nulo), con `creada_en` con zona horaria, y con exactamente una línea de `historial_estado_orden`: `desde_estado` nulo, `hasta_estado` `PENDIENTE`, `usuario_id` del usuario que la creó y `cuando` con zona horaria (RN10, RN19). La orden, sus ítems y esa línea MUST escribirse en una sola transacción: si cualquiera falla, no queda ninguna.

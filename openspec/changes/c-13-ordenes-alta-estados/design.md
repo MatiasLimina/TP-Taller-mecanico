@@ -379,6 +379,7 @@ Todos los supuestos fueron **confirmados por el usuario el 2026-10-30**, cada un
 - Reutilizar `OrdenesUoW` y `OrdenesUoWDep` tal cual (ya cumple `ConStock`). Agregar en `OrdenTrabajoRepository` un `get_para_actualizar(id)` con `FOR UPDATE` + `populate_existing` y tomarlo **primero** en el bloque (paso 1 de D6); después, si corresponde, `aplicar_movimientos_stock(uow, …, incluir_bajas=True)` (paso 3, el punto único ordena por id). Nunca bloquear un vehículo ni un repuesto antes que la orden.
 - Transiciones guiadas por `uow.estados.get_por_codigo(...).es_final` y `CodigoEstado`; cada transición agrega una línea con `uow.historial.add(HistorialEstadoOrden(desde_estado=<anterior>, hasta_estado=<nuevo>, usuario_id=actor, cuando=datetime.now(UTC)))` (nunca `UPDATE`: sólo agregado).
 - La respuesta de las transiciones puede reutilizar `get_detalle` + `armar_detalle` (misma forma que el alta).
+- Después de `aplicar_movimientos_stock` (`synchronize_session=False`) las entidades `Repuesto` ya cargadas quedan con stock viejo: armar la respuesta releyendo la orden con `get_detalle`, que usa `populate_existing`, y nunca desde entidades cargadas antes del descuento (revisión FINAL_DIFF de C-13).
 - `router_ordenes` no tiene rol de router: `iniciar` usa su propio `requiere_rol(Rol.MECANICO)`; `terminar` y `cancelar` no llevan `requiere_rol` (permiso en el servicio, 403 antes que 409).
 
 **C-15 (lecturas — Nico propone, Lauti implementa)**
