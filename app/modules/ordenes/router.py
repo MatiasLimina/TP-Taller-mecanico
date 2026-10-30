@@ -16,6 +16,17 @@ parámetro y FastAPI la resuelve antes de validar el cuerpo. Orden de los rechaz
 (cambio pendiente) -> 403 (rol) -> 422 -> 409; un JSON mal formado da 422 antes de resolver
 dependencias. El servicio recibe `actual.id` y no `UsuarioActual`: `ordenes.service` no depende de
 `usuarios.service`.
+
+Transiciones (C-14, `POST /ordenes/{orden_id}/iniciar|terminar|cancelar`): sin cuerpo (nada viaja
+del cliente: estado destino, mecánico y actor los decide el servidor) y con `IdRuta` (422 si el id
+no es entero o está fuera de 1..INT4). Orden de los rechazos:
+
+- `iniciar` (`iniciar_orden = requiere_rol(Rol.MECANICO)`, creada UNA vez): 401 -> 403 (cambio
+  pendiente) -> 403 (rol; un ADMIN sin MECANICO no pasa) -> 422 -> 404 -> 409.
+- `terminar` y `cancelar` NO llevan `requiere_rol`: el permiso depende de la relación con la orden
+  (mecánico asignado, dueño), que sólo se conoce después de leerla. Lo decide el servicio, con los
+  roles vigentes de la base: 401 -> 403 (cambio pendiente) -> 422 -> 404 -> 403 (sin relación) ->
+  409. Primero 404 y después 403 (S-07): el PDF pide 403 para «una orden ajena».
 """
 
 from typing import Annotated
@@ -23,6 +34,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from app.core.dependencies import requiere_rol
+from app.core.schemas import IdRuta
 from app.modules.ordenes import service
 from app.modules.ordenes.schemas import (
     EstadoOrdenSalida,
@@ -35,6 +47,8 @@ from app.modules.usuarios.service import UsuarioActual
 
 alta_orden = requiere_rol(Rol.RECEPCION, Rol.ADMIN)  # UNA función
 AltaOrdenDep = Annotated[UsuarioActual, Depends(alta_orden)]
+iniciar_orden = requiere_rol(Rol.MECANICO)  # UNA función (C-14)
+IniciarOrdenDep = Annotated[UsuarioActual, Depends(iniciar_orden)]
 
 router_ordenes = APIRouter(prefix="/ordenes", tags=["ordenes"])
 router_estados = APIRouter(prefix="/estados-orden", tags=["estados-orden"])
@@ -50,3 +64,10 @@ async def alta(
 @router_estados.get("")
 async def listar_estados(uow: OrdenesUoWDep) -> list[EstadoOrdenSalida]:
     return await service.listar_estados(uow)
+
+
+@router_ordenes.post("/{orden_id}/iniciar", status_code=200)
+async def iniciar(
+    orden_id: IdRuta, actual: IniciarOrdenDep, uow: OrdenesUoWDep
+) -> OrdenDetalleSalida:
+    return await service.iniciar(uow, orden_id, actual.id)

@@ -320,3 +320,26 @@ def _traducir_catalogo(exc: IntegrityError, destino: CodigoEstado) -> None:
     Cualquier otra restricción sigue su camino (manejador global)."""
     if restriccion_violada(exc) in RESTRICCIONES_DE_ESTADO:
         raise Conflicto(MENSAJE_CATALOGO_SIN_ESTADO.format(estado=destino.value)) from None
+
+
+# -- Transiciones (C-14) -----------------------------------------------------------------------
+
+
+async def iniciar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetalleSalida:
+    """PENDIENTE -> EN_REPARACION; el actor queda como mecánico asignado (RN11, S-05).
+
+    El rol MECANICO lo exige el router con `requiere_rol` (antes de buscar la orden); acá no hay
+    permiso por relación. Una orden ya iniciada (propia o de otro mecánico) da 409 sin reasignar.
+    """
+    destino = CodigoEstado.EN_REPARACION
+    try:
+        async with uow:
+            orden = await _bloquear_orden(uow, orden_id)  # paso 1 — 404
+            await _exigir_transicion(uow, orden, destino)  # 409
+            salida = await _aplicar_transicion(
+                uow, orden, destino, usuario_id, mecanico_id=usuario_id
+            )
+    except IntegrityError as exc:
+        _traducir_catalogo(exc, destino)
+        raise
+    return salida
