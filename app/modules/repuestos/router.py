@@ -1,10 +1,11 @@
-"""Rutas del módulo repuestos (C-11): catálogo, alta, edición y baja.
+"""Rutas del módulo repuestos (C-11 catálogo, alta, edición y baja; C-12 reposición e historiales).
 
 Dos `APIRouter` con el mismo prefijo `/repuestos` (S-13), ambos en el grupo protegido (RN06):
 
 - `router_catalogo` (lectura): ADMIN, RECEPCION y MECANICO.
-- `router_admin_repuestos` (escritura): sólo ADMIN. C-12 cuelga de acá `reponer`,
-  `movimientos` y `precios`.
+- `router_admin_repuestos` (escritura): sólo ADMIN. C-12 cuelga de acá `POST /{id}/reponer`,
+  `GET /{id}/movimientos` y `GET /{id}/precios` (S-12: `main.py` no cambia; una consulta de
+  roles por petición). Los historiales van sin paginar y en orden cronológico (S-05, S-06).
 
 Cada `requiere_rol` se crea UNA vez (`personal_repuestos`, `solo_admin`) y se usa a nivel de
 router (y como `AdminDep` en los handlers que necesitan el id del actor): FastAPI cachea la
@@ -25,6 +26,9 @@ from app.core.schemas import IdRuta
 from app.modules.repuestos import service
 from app.modules.repuestos.schemas import (
     LARGO_MAXIMO_BUSQUEDA,
+    MovimientoSalida,
+    PrecioHistorialSalida,
+    ReposicionEntrada,
     RepuestoAltaEntrada,
     RepuestoEdicionEntrada,
     RepuestoSalida,
@@ -78,3 +82,23 @@ async def editar(
 @router_admin_repuestos.delete("/{repuesto_id}", status_code=204)
 async def baja(repuesto_id: IdRuta, uow: RepuestosUoWDep) -> None:
     await service.baja(uow, repuesto_id)
+
+
+@router_admin_repuestos.post("/{repuesto_id}/reponer", status_code=200)
+async def reponer(
+    repuesto_id: IdRuta,
+    datos: ReposicionEntrada,
+    actual: AdminDep,
+    uow: RepuestosUoWDep,
+) -> RepuestoSalida:
+    return await service.reponer(uow, repuesto_id, datos, actual.id)
+
+
+@router_admin_repuestos.get("/{repuesto_id}/movimientos")
+async def listar_movimientos(repuesto_id: IdRuta, uow: RepuestosUoWDep) -> list[MovimientoSalida]:
+    return await service.listar_movimientos(uow, repuesto_id)
+
+
+@router_admin_repuestos.get("/{repuesto_id}/precios")
+async def listar_precios(repuesto_id: IdRuta, uow: RepuestosUoWDep) -> list[PrecioHistorialSalida]:
+    return await service.listar_precios(uow, repuesto_id)
