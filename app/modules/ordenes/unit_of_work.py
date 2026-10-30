@@ -47,7 +47,7 @@ class OrdenesUoW(UnitOfWork):
         self.historial = HistorialEstadoOrdenRepository(session)
         self.vehiculos = VehiculoRepository(session)  # de clientes (C-10): bloqueo del vehículo
         self.repuestos = RepuestoRepository(session)  # de repuestos (C-11): lectura FOR SHARE
-        # Sin uso en C-13: completa `ConStock` para C-14.
+        # Lo usa `terminar` (C-14) por el punto único de stock; el alta de C-13 no.
         self.movimientos = MovimientoStockRepository(session)
         # De usuarios: roles vigentes del actor leídos en la misma transacción (RN04, C-14 S-03).
         self.asignaciones = AsignacionRolRepository(session)
