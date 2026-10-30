@@ -9,6 +9,7 @@ sueltas: no hay carga perezosa posible.
 solo exponen `add()`; C-12 les agrega el listado.
 """
 
+from collections.abc import Collection
 from datetime import datetime
 from typing import NamedTuple
 
@@ -128,6 +129,31 @@ class RepuestoRepository(SoftDeleteRepository[Repuesto]):
         ).where(col(Repuesto.id) == repuesto_id)
         fila = (await self.session.exec(consulta)).first()
         return None if fila is None else FilaStock(*fila)
+
+    async def listar_vigentes_para_orden(self, ids: Collection[int]) -> list[Repuesto]:
+        """Repuestos VIGENTES entre `ids`, en orden de id y con la fila bloqueada `FOR SHARE`.
+
+        Lo usa el alta de una orden (C-13): una sola consulta para todos los repuestos pedidos (los
+        ids viajan como parámetros ligados). `FOR SHARE` choca con el `FOR UPDATE` del PATCH y la baja
+        (`get_vigente_para_actualizar`) y con el `UPDATE` del punto único de stock, así que la orden
+        copia un precio y un repuesto que no cambian hasta que ella confirme; dos altas que comparten
+        repuestos no se esperan entre sí. Con `ORDER BY id` PostgreSQL bloquea las filas en orden
+        ascendente de id (orden global de bloqueo, design C-13 D6: vehículo, luego repuestos), lo que
+        evita interbloqueos con quien los toma de a uno. Si la fila cambió mientras esperaba, la
+        reevalúa: una baja confirmada la excluye y un precio nuevo se lee nuevo.
+
+        Devuelve sólo los vigentes: el llamador distingue los inexistentes o dados de baja por
+        diferencia con lo pedido. No escribe `stock`. `populate_existing` refresca instancias que el
+        identity map ya tuviera cargadas.
+        """
+        consulta = (
+            self._consulta_base()
+            .where(col(Repuesto.id).in_(sorted(ids)))
+            .order_by(col(Repuesto.id))
+            .with_for_update(read=True)
+            .execution_options(populate_existing=True)
+        )
+        return list((await self.session.exec(consulta)).all())
 
 
 class MovimientoStockRepository(BaseRepository[MovimientoStock]):
