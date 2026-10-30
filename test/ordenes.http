@@ -1,0 +1,1175 @@
+# =============================================================================
+# test/ordenes.http -- Casos de C-13 ordenes-alta-estados
+#   (POST /ordenes -- alta de una orden de trabajo --, GET /estados-orden)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada caso).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin repuestos, ordenes ni
+#    catalogo de estados):
+#
+#   -- 1) vacia el dominio de ordenes y repuestos. El disparador de solo agregado rechaza DELETE en
+#   --    historial_estado_orden, movimiento_stock e historial_precio_repuesto, y una orden creada por
+#   --    la API no se puede borrar porque su historial la referencia; TRUNCATE no dispara el
+#   --    disparador (es la via que usa seed.py para recargar el estado inicial). Sin CASCADE: falla
+#   --    si otra tabla los referenciara.
+#   --    ATENCION: vacia TODAS las ordenes y TODOS los repuestos, tambien los de otros datos de
+#   --    desarrollo.
+#   TRUNCATE historial_estado_orden, item_orden, movimiento_stock, historial_precio_repuesto,
+#     orden_trabajo, repuesto RESTART IDENTITY;
+#
+#   -- 2) limpia SOLO lo de este archivo (correos @ordenes.example.com, documentos 460000xx,
+#   --    patentes ZO...):
+#   DELETE FROM vehiculo WHERE patente LIKE 'ZO%';
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@ordenes.example.com'
+#     OR accion LIKE '%@ordenes.example.com%';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@ordenes.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@ordenes.example.com')
+#     OR otorgada_por IN (SELECT id FROM usuario WHERE email LIKE '%@ordenes.example.com');
+#   DELETE FROM vehiculo WHERE cliente_id IN (SELECT id FROM cliente WHERE documento LIKE '460000%');
+#   DELETE FROM cliente WHERE documento LIKE '460000%' OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@ordenes.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@ordenes.example.com';
+#
+#   -- 3) catalogo de estados (C-06 todavia no existe; si ya esta cargado no cambia nada):
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('PENDIENTE', 'Pendiente', 1, false), ('EN_REPARACION', 'En reparación', 2, false),
+#     ('TERMINADA', 'Terminada', 3, true), ('CANCELADA', 'Cancelada', 4, true)
+#   ON CONFLICT DO NOTHING;
+#
+# Si C-06 (seed) ya existe, correr `python seed.py` antes y luego el bloque de arriba.
+# Rangos propios: correos @ordenes.example.com, documentos 460000xx (C-10 usa 430000xx, C-11 440000xx,
+# C-12 450000xx), patentes ZO... (C-10 usa ZC...), codigos de repuesto ORD-... (C-12 usa STK-...).
+# El archivo es de una sola pasada sobre ese estado: los ids de repuesto (1 a 6) y de orden (1 a 6)
+# salen de RESTART IDENTITY.
+#
+# Reutilizar una sesion: `Cookie: {{loginRecepcion.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Personas: jefa (ADMIN), recepcion (RECEPCION), mecanico (MECANICO), duena (solo CLIENTE; su ficha
+# es la duena de los vehiculos) y pendiente (debe cambiar la contrasena). Todas se crean por
+# registro + INSERT del rol.
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de jefa@ordenes.example.com
+# Esperado: 201 con {id, email, nombre, cliente:{...}}
+# @name registroJefa
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jefa@ordenes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Josefina Jefa",
+  "documento": "46000001",
+  "telefono": "1146000001"
+}
+
+### 2. Registro de recepcion@ordenes.example.com
+# Esperado: 201
+# @name registroRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "recepcion@ordenes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Rita Recepcion",
+  "documento": "46000002",
+  "telefono": "1146000002"
+}
+
+### 3. Registro de mecanico@ordenes.example.com
+# Esperado: 201
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "mecanico@ordenes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Mario Mecanico",
+  "documento": "46000003",
+  "telefono": "1146000003"
+}
+
+### 4. Registro de duena@ordenes.example.com
+# Esperado: 201 con cliente.id
+# @name registroDuena
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "duena@ordenes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Laura Duena",
+  "documento": "46000004",
+  "telefono": "1146000004"
+}
+
+### 5. Registro de pendiente@ordenes.example.com
+# Esperado: 201
+# Despues (psql): jefa pasa a ser ADMIN, recepcion RECEPCION, mecanico MECANICO, y pendiente debe
+# cambiar la contrasena:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'ADMIN' FROM usuario WHERE email = 'jefa@ordenes.example.com';
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'RECEPCION' FROM usuario WHERE email = 'recepcion@ordenes.example.com';
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'MECANICO' FROM usuario WHERE email = 'mecanico@ordenes.example.com';
+#   UPDATE usuario SET debe_cambiar_password = true WHERE email = 'pendiente@ordenes.example.com';
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "pendiente@ordenes.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Pablo Pendiente",
+  "documento": "46000005",
+  "telefono": "1146000005"
+}
+
+### 6. Login de jefa
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+# @name loginJefa
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "jefa@ordenes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 7. Login de recepcion
+# Esperado: 200
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@ordenes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 8. Login de mecanico
+# Esperado: 200
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@ordenes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 9. Login de duena
+# Esperado: 200
+# @name loginDuena
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "duena@ordenes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 10. Login de pendiente
+# Esperado: 200 (con debe_cambiar_password: true)
+# @name loginPendiente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "pendiente@ordenes.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 11. Alta del repuesto ORD-FIL-01 (id 1)
+# Esperado: 201 con "id": 1, "precio": "8500.00", "stock": 10
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-FIL-01",
+  "descripcion": "Filtro de aceite",
+  "precio": 8500,
+  "stock_inicial": 10
+}
+
+### 12. Alta del repuesto ORD-FRE-01 (id 2)
+# Esperado: 201 con "id": 2, "precio": "32000.00", "stock": 4
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-FRE-01",
+  "descripcion": "Pastillas de freno delanteras",
+  "precio": 32000,
+  "stock_inicial": 4
+}
+
+### 13. Alta del repuesto ORD-BUJ-01 (id 3)
+# Esperado: 201 con "id": 3, "precio": "4500.00", "stock": 2
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-BUJ-01",
+  "descripcion": "Bujía",
+  "precio": 4500,
+  "stock_inicial": 2
+}
+
+### 14. Alta del repuesto ORD-ACE-01 (id 4)
+# Esperado: 201 con "id": 4, "precio": "12000.00", "stock": 20
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-ACE-01",
+  "descripcion": "Aceite 5W30 por litro",
+  "precio": 12000,
+  "stock_inicial": 20
+}
+
+### 15. Alta del repuesto ORD-BAJA-01 (id 5)
+# Esperado: 201 con "id": 5, "stock": 0
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-BAJA-01",
+  "descripcion": "Repuesto dado de baja",
+  "precio": 1000
+}
+
+### 16. Alta del repuesto ORD-CARO-01 (id 6)
+# Esperado: 201 con "id": 6, "precio": "99999999.99", "stock": 0
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "ORD-CARO-01",
+  "descripcion": "Repuesto caro",
+  "precio": "99999999.99"
+}
+
+### 17. Baja del repuesto 5 (queda dado de baja para los casos de las ordenes)
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/repuestos/5
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 18. Vehiculo ZOR001 de la duena
+# Esperado: 201 con "patente": "ZOR001"
+# @name vehDuena
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZOR001",
+  "marca": "Ford",
+  "modelo": "Fiesta",
+  "anio": 2015
+}
+
+### 19. Vehiculo ZOR002 de la duena
+# Esperado: 201 con "patente": "ZOR002"
+# @name vehBaja
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZOR002",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2010
+}
+
+### 20. Baja del vehiculo ZOR002 (vehBaja)
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehBaja.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 21. Vehiculo ZOR003 de recepcion
+# Esperado: 201 con "patente": "ZOR003"
+# @name vehOtro
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroRecepcion.response.body.$.cliente.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZOR003",
+  "marca": "Renault",
+  "modelo": "Clio",
+  "anio": 2018
+}
+
+# =============================================================================
+# B. Catalogo de estados (spec order-states)
+# =============================================================================
+
+### 22. GET /estados-orden sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/estados-orden
+
+### 23. GET /estados-orden con un usuario que debe cambiar la contrasena
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+
+### 24. GET /estados-orden con la sesion de un cliente (solo CLIENTE): cualquier autenticado
+# Esperado: 200 exactamente los cuatro estados en orden de posicion:
+#   [{"codigo": "PENDIENTE", "descripcion": "Pendiente", "posicion": 1, "es_final": false}, {"codigo": "EN_REPARACION", "descripcion": "En reparación", "posicion": 2, "es_final": false}, {"codigo": "TERMINADA", "descripcion": "Terminada", "posicion": 3, "es_final": true}, {"codigo": "CANCELADA", "descripcion": "Cancelada", "posicion": 4, "es_final": true}]
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 25. GET /estados-orden con la sesion de mecanico
+# Esperado: 200 igual que el caso 24
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 26. POST /estados-orden: el catalogo no se escribe por la API (RN19)
+# Esperado: 405
+# Despues (psql): se vacia el catalogo (todavia no hay ordenes que lo referencien):
+#   DELETE FROM estado_orden;
+# @no-cookie-jar
+POST {{base}}/estados-orden
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 27. GET /estados-orden con el catalogo vacio
+# Esperado: 200 []
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 28. POST /ordenes valido con el catalogo vacio (RN19)
+# Esperado: 409 {"detail": "No se pueden crear órdenes: el catálogo de estados está vacío o no tiene el estado PENDIENTE"}
+# psql: no se escribio nada:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+#   SELECT count(*) FROM item_orden;  -- 0
+#   SELECT count(*) FROM historial_estado_orden;  -- 0
+# Despues (psql): se carga el catalogo SIN el estado PENDIENTE:
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('EN_REPARACION', 'En reparación', 2, false), ('TERMINADA', 'Terminada', 3, true),
+#     ('CANCELADA', 'Cancelada', 4, true);
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 29. GET /estados-orden con el catalogo parcial
+# Esperado: 200 los tres cargados, en orden de posicion (EN_REPARACION, TERMINADA, CANCELADA)
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 30. POST /ordenes valido con el catalogo sin PENDIENTE (mismo mensaje)
+# Esperado: 409 {"detail": "No se pueden crear órdenes: el catálogo de estados está vacío o no tiene el estado PENDIENTE"}
+# psql: no se escribio nada:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+#   SELECT count(*) FROM item_orden;  -- 0
+#   SELECT count(*) FROM historial_estado_orden;  -- 0
+# Despues (psql): se completa el catalogo (mismo INSERT del encabezado):
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('PENDIENTE', 'Pendiente', 1, false), ('EN_REPARACION', 'En reparación', 2, false),
+#     ('TERMINADA', 'Terminada', 3, true), ('CANCELADA', 'Cancelada', 4, true)
+#   ON CONFLICT DO NOTHING;
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 31. GET /estados-orden con el catalogo completo otra vez
+# Esperado: 200 los cuatro estados (como el caso 24)
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Acceso (spec work-orders, "Alta de orden solo por recepcion o administracion")
+# =============================================================================
+
+### 32. POST /ordenes sin cookie y con un campo extra
+# La sesion se exige antes que el contrato del cuerpo.
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"} (NO 422)
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "total": 1,
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 33. POST /ordenes con un usuario que debe cambiar la contrasena
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 34. POST /ordenes con la sesion de la duena (solo CLIENTE)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 35. POST /ordenes con la sesion de mecanico
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 36. POST /ordenes de la duena con items vacios: el rol se exige antes que el contrato
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"} (NO 422)
+# psql: no se escribio nada:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": []
+}
+
+# =============================================================================
+# D. Contrato de entrada (422, con la sesion de recepcion)
+# =============================================================================
+
+### 37. Campo total en el cuerpo (RN10)
+# Esperado: 422 con loc ["body", "total"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "total": 68000,
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 38. Campo estado en el cuerpo
+# Esperado: 422 con loc ["body", "estado"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "estado": "TERMINADA",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 39. Campo creada_en en el cuerpo
+# Esperado: 422 con loc ["body", "creada_en"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "creada_en": "2026-10-23T02:18:54Z",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 40. Campo mecanico_id en el cuerpo
+# Esperado: 422 con loc ["body", "mecanico_id"] y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "mecanico_id": 1,
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 41. precio_unitario dentro de un item (nadie fija el precio)
+# Esperado: 422 con loc ["body", "items", 0, "precio_unitario"]: nombra el campo "precio_unitario" y type "extra_forbidden"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1, "precio_unitario": 1}
+  ]
+}
+
+### 42. items vacio
+# Esperado: 422 con loc ["body", "items"] y type "too_short"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": []
+}
+
+### 43. Sin items
+# Esperado: 422 con loc ["body", "items"] y type "missing"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar"
+}
+
+### 44. Repuesto repetido en los items (RN10, S-08)
+# Esperado: 422 con loc ["body", "items"] y mensaje "Hay repuestos repetidos en la orden: 2"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3},
+    {"repuesto_id": 2, "cantidad": 2}
+  ]
+}
+
+### 45. cantidad 0
+# Esperado: 422 con loc ["body", "items", 0, "cantidad"]: nombra el campo "cantidad"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 0}
+  ]
+}
+
+### 46. cantidad negativa
+# Esperado: 422 con loc ["body", "items", 0, "cantidad"]: nombra el campo "cantidad"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": -1}
+  ]
+}
+
+### 47. cantidad 1001 (el maximo por item es 1000)
+# Esperado: 422 con loc ["body", "items", 0, "cantidad"]: nombra el campo "cantidad"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1001}
+  ]
+}
+
+### 48. cantidad decimal
+# Esperado: 422 con loc ["body", "items", 0, "cantidad"]: nombra el campo "cantidad"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 2, "cantidad": 1.5}]
+}
+
+### 49. 51 items (el maximo es 50)
+# Esperado: 422 con loc ["body", "items"] y type "too_long"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 1, "cantidad": 1}, {"repuesto_id": 2, "cantidad": 1}, {"repuesto_id": 3, "cantidad": 1}, {"repuesto_id": 4, "cantidad": 1}, {"repuesto_id": 5, "cantidad": 1}, {"repuesto_id": 6, "cantidad": 1}, {"repuesto_id": 7, "cantidad": 1}, {"repuesto_id": 8, "cantidad": 1}, {"repuesto_id": 9, "cantidad": 1}, {"repuesto_id": 10, "cantidad": 1}, {"repuesto_id": 11, "cantidad": 1}, {"repuesto_id": 12, "cantidad": 1}, {"repuesto_id": 13, "cantidad": 1}, {"repuesto_id": 14, "cantidad": 1}, {"repuesto_id": 15, "cantidad": 1}, {"repuesto_id": 16, "cantidad": 1}, {"repuesto_id": 17, "cantidad": 1}, {"repuesto_id": 18, "cantidad": 1}, {"repuesto_id": 19, "cantidad": 1}, {"repuesto_id": 20, "cantidad": 1}, {"repuesto_id": 21, "cantidad": 1}, {"repuesto_id": 22, "cantidad": 1}, {"repuesto_id": 23, "cantidad": 1}, {"repuesto_id": 24, "cantidad": 1}, {"repuesto_id": 25, "cantidad": 1}, {"repuesto_id": 26, "cantidad": 1}, {"repuesto_id": 27, "cantidad": 1}, {"repuesto_id": 28, "cantidad": 1}, {"repuesto_id": 29, "cantidad": 1}, {"repuesto_id": 30, "cantidad": 1}, {"repuesto_id": 31, "cantidad": 1}, {"repuesto_id": 32, "cantidad": 1}, {"repuesto_id": 33, "cantidad": 1}, {"repuesto_id": 34, "cantidad": 1}, {"repuesto_id": 35, "cantidad": 1}, {"repuesto_id": 36, "cantidad": 1}, {"repuesto_id": 37, "cantidad": 1}, {"repuesto_id": 38, "cantidad": 1}, {"repuesto_id": 39, "cantidad": 1}, {"repuesto_id": 40, "cantidad": 1}, {"repuesto_id": 41, "cantidad": 1}, {"repuesto_id": 42, "cantidad": 1}, {"repuesto_id": 43, "cantidad": 1}, {"repuesto_id": 44, "cantidad": 1}, {"repuesto_id": 45, "cantidad": 1}, {"repuesto_id": 46, "cantidad": 1}, {"repuesto_id": 47, "cantidad": 1}, {"repuesto_id": 48, "cantidad": 1}, {"repuesto_id": 49, "cantidad": 1}, {"repuesto_id": 50, "cantidad": 1}, {"repuesto_id": 51, "cantidad": 1}]
+}
+
+### 50. falla de solo espacios
+# Esperado: 422 con loc ["body", "falla"]
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "   ",
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 51. falla de 501 caracteres (el maximo es 500)
+# Esperado: 422 con loc ["body", "falla"]
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 52. Sin falla
+# Esperado: 422 con loc ["body", "falla"] y type "missing"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 53. vehiculo_id 0
+# Esperado: 422 con loc ["body", "vehiculo_id"]
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": 0,
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 54. vehiculo_id no numerico
+# Esperado: 422 con loc ["body", "vehiculo_id"]
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": "abc",
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 55. vehiculo_id 2147483648 (fuera de int4: 422, no 500)
+# Esperado: 422 con loc ["body", "vehiculo_id"]
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": 2147483648,
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 2, "cantidad": 1}]
+}
+
+### 56. repuesto_id 0
+# Esperado: 422 con loc ["body", "items", 0, "repuesto_id"]: nombra el campo "repuesto_id"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [{"repuesto_id": 0, "cantidad": 1}]
+}
+
+### 57. JSON mal formado
+# Esperado: 422 con type "json_invalid"
+# psql: ninguno de los casos 37 a 57 escribio nada:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+#   SELECT count(*) FROM item_orden;  -- 0
+#   SELECT count(*) FROM historial_estado_orden;  -- 0
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{"vehiculo_id": 1, "falla": "x", "items": [
+
+# =============================================================================
+# E. Rechazos de negocio (409 y 422 propios, con la sesion de recepcion)
+# =============================================================================
+
+### 58. vehiculo_id inexistente
+# Esperado: 409 {"detail": "El vehículo 999999 no existe o está dado de baja"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": 999999,
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 59. Vehiculo dado de baja (RN16)
+# Esperado: 409 {"detail": "El vehículo <id de vehBaja> no existe o está dado de baja"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehBaja.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 60. Repuesto inexistente (caso PDF C-10: 409 y la orden no queda creada)
+# Esperado: 409 {"detail": "Repuestos inexistentes o dados de baja: 999999"}
+# psql: no se escribio nada:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+#   SELECT count(*) FROM item_orden;  -- 0
+#   SELECT count(*) FROM historial_estado_orden;  -- 0
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 999999, "cantidad": 1}
+  ]
+}
+
+### 61. Repuesto dado de baja (RN16)
+# Esperado: 409 {"detail": "Repuestos inexistentes o dados de baja: 5"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 5, "cantidad": 1}
+  ]
+}
+
+### 62. Varios repuestos invalidos: todos los ids, en orden ascendente (S-10)
+# Esperado: 409 {"detail": "Repuestos inexistentes o dados de baja: 5, 999998"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 999998, "cantidad": 1},
+    {"repuesto_id": 5, "cantidad": 1},
+    {"repuesto_id": 2, "cantidad": 1}
+  ]
+}
+
+### 63. Vehiculo y repuesto invalidos: se informa primero el vehiculo
+# Esperado: 409 {"detail": "El vehículo 999999 no existe o está dado de baja"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": 999999,
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 999999, "cantidad": 1}
+  ]
+}
+
+### 64. Total mayor que NUMERIC(12,2)
+# Esperado: 422 {"detail": "El total de la orden supera el máximo admitido (9999999999.99)"}
+# psql: ningun rechazo de la seccion E escribio nada ni toco el stock:
+#   SELECT count(*) FROM orden_trabajo;  -- 0
+#   SELECT count(*) FROM item_orden;  -- 0
+#   SELECT count(*) FROM historial_estado_orden;  -- 0
+#   SELECT id, stock FROM repuesto ORDER BY id;  -- (1,10) (2,4) (3,2) (4,20) (5,0) (6,0)
+#   SELECT count(*) FROM movimiento_stock;  -- 4 (los stock iniciales de los repuestos 1 a 4)
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 6, "cantidad": 1000}
+  ]
+}
+
+# =============================================================================
+# F. Alta (spec work-orders, caso PDF C-10)
+# =============================================================================
+
+### 65. Alta con dos items: precios copiados, total y primera linea de historial (caso PDF C-10)
+# Esperado: 201 exactamente {"id": 1, "estado": "PENDIENTE", "patente": "ZOR001", "total": "68000.00",
+#   "creada_en": "<ISO con Z>", "mecanico_id": null, "falla": "Ruido al frenar", "cliente": "Laura Duena",
+#   "items": [{"repuesto_id": 2, "codigo": "ORD-FRE-01", "descripcion": "Pastillas de freno delanteras",
+#   "cantidad": 1, "precio_unitario": "32000.00", "subtotal": "32000.00"},
+#   {"repuesto_id": 4, "codigo": "ORD-ACE-01", "descripcion": "Aceite 5W30 por litro", "cantidad": 3,
+#   "precio_unitario": "12000.00", "subtotal": "36000.00"}],
+#   "historial": [{"desde_estado": null, "hasta_estado": "PENDIENTE", "usuario_id": <recepcion>,
+#   "cuando": "<igual a creada_en>"}]}
+# psql: la orden, sus items y el historial; el stock no cambia:
+#   SELECT estado, mecanico_id, total FROM orden_trabajo WHERE id = 1;  -- PENDIENTE | (NULL) | 68000.00
+#   SELECT repuesto_id, cantidad, precio_unitario FROM item_orden WHERE orden_id = 1 ORDER BY id;
+#     -- 2 | 1 | 32000.00 y 4 | 3 | 12000.00
+#   SELECT desde_estado, hasta_estado, usuario_id = (SELECT id FROM usuario WHERE email = 'recepcion@ordenes.example.com')
+#     FROM historial_estado_orden WHERE orden_id = 1;  -- (NULL) | PENDIENTE | t
+#   SELECT id, stock FROM repuesto WHERE id IN (2, 4) ORDER BY id;  -- (2,4) (4,20)
+#   SELECT count(*) FROM movimiento_stock;  -- 4
+# @name altaOrden
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "  Ruido al frenar ",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 3}
+  ]
+}
+
+### 66. Alta de la jefa (ADMIN) sobre otro vehiculo
+# Esperado: 201 con "id": 2, "total": "17000.00", "patente": "ZOR003", "cliente": "Rita Recepcion" y la linea de historial
+#   con "usuario_id" de jefa
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehOtro.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 2}
+  ]
+}
+
+### 67. Los items se guardan y se devuelven en el orden del cuerpo
+# Esperado: 201 con "id": 3, los items en el orden 4, 1, 3 con subtotales "12000.00", "8500.00", "9000.00" y
+#   "total": "29500.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 4, "cantidad": 1},
+    {"repuesto_id": 1, "cantidad": 1},
+    {"repuesto_id": 3, "cantidad": 2}
+  ]
+}
+
+### 68. Cantidad mayor que el stock: el stock se valida al terminar, no al crear (RN13, S-17)
+# Esperado: 201 con "id": 4 y "total": "18000.00"
+# psql: el stock de la bujia sigue en 2:
+#   SELECT stock FROM repuesto WHERE id = 3;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 3, "cantidad": 4}
+  ]
+}
+
+### 69. Total en el limite de NUMERIC(12,2)
+# Esperado: 201 con "id": 5 y "total": "9999999999.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 6, "cantidad": 100}
+  ]
+}
+
+### 70. Cambio de precio del repuesto 2 (RN20)
+# Esperado: 200 con "precio": "35000.00"
+# @no-cookie-jar
+PATCH {{base}}/repuestos/2
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "precio": 35000
+}
+
+### 71. Una orden nueva copia el precio vigente; la anterior conserva el suyo
+# Esperado: 201 con "id": 6, "precio_unitario": "35000.00" y "total": "35000.00"
+# psql: la orden 1 conserva el precio y el total de cuando se creo:
+#   SELECT precio_unitario FROM item_orden WHERE orden_id = 1 AND repuesto_id = 2;  -- 32000.00
+#   SELECT total FROM orden_trabajo WHERE id = 1;  -- 68000.00
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 2, "cantidad": 1}
+  ]
+}
+
+### 72. Baja del vehiculo con ordenes abiertas (C-10, RN16)
+# Esperado: 409 {"detail": "El vehículo tiene órdenes abiertas y no se puede dar de baja"}
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehDuena.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 73. Baja del repuesto 1 (usado en las ordenes 2 y 3)
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/repuestos/1
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 74. Una orden nueva con el repuesto dado de baja (RN16)
+# Esperado: 409 {"detail": "Repuestos inexistentes o dados de baja: 1"}
+# psql: las ordenes ya creadas conservan el item del repuesto dado de baja:
+#   SELECT count(*) FROM item_orden WHERE repuesto_id = 1;  -- 2 (ordenes 2 y 3)
+#   SELECT count(*) FROM orden_trabajo;  -- 6
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena.response.body.$.id}},
+  "falla": "Ruido al frenar",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1}
+  ]
+}
+
+### 75. El catalogo de estados no cambia con las altas
+# Esperado: 200 los cuatro estados (como el caso 24)
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+# =============================================================================
+# G. Invariantes (psql, specs work-orders y stock-movements) -- no son peticiones HTTP
+# =============================================================================
+
+### 76. total = suma de cantidad x precio_unitario en todas las ordenes
+# psql:
+#   SELECT o.id, o.total, SUM(i.cantidad * i.precio_unitario)
+#     FROM orden_trabajo o JOIN item_orden i ON i.orden_id = o.id GROUP BY o.id ORDER BY o.id;
+# Esperado: 6 filas (ordenes 1 a 6) con el total igual a la suma.
+
+### 77. Una sola linea de historial NULL -> PENDIENTE por orden, con el actor
+# psql:
+#   SELECT orden_id, count(*), bool_and(desde_estado IS NULL AND hasta_estado = 'PENDIENTE')
+#     FROM historial_estado_orden GROUP BY orden_id ORDER BY orden_id;
+#   SELECT orden_id, usuario_id FROM historial_estado_orden ORDER BY orden_id;
+# Esperado: una fila por orden con count 1 y true; el usuario_id es el de recepcion salvo la orden 2 (jefa).
+
+### 78. Estado inicial, sin mecanico y un solo instante para la creacion y su primera linea (S-12)
+# psql:
+#   SELECT o.id, o.estado, o.mecanico_id, o.creada_en = h.cuando
+#     FROM orden_trabajo o JOIN historial_estado_orden h ON h.orden_id = o.id ORDER BY o.id;
+# Esperado: 6 filas con PENDIENTE, (NULL) y t.
+
+### 79. El alta no toca el stock (RN14)
+# psql:
+#   SELECT r.id, r.stock, COALESCE(SUM(m.cantidad), 0)
+#     FROM repuesto r LEFT JOIN movimiento_stock m ON m.repuesto_id = r.id GROUP BY r.id ORDER BY r.id;
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id IS NOT NULL;
+# Esperado: stock 10, 4, 2, 20, 0, 0 igual a la suma de movimientos; 0 movimientos con orden_id.
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP; script temporal no versionado
+# `verificar_c13.py`, design D12 bloques a-k)
+# =============================================================================
+# - Carreras con la baja de vehiculos: baja primero -> el alta espera y responde 409 vehiculo; alta primero
+#   (detenida en el repuesto por otra conexion) -> la baja espera y responde 409 "ordenes abiertas".
+# - Carreras con la baja y el PATCH de precio de repuestos, en ambos sentidos: baja primero -> 409 con el id;
+#   precio primero -> el item guarda el precio nuevo; alta primero -> baja y PATCH esperan y la orden
+#   queda con el repuesto y el precio de antes.
+# - Sin interbloqueos con el punto unico de stock: 20 repeticiones de dos altas con los mismos repuestos en
+#   orden inverso + PATCH de precio + aplicar_movimientos_stock (nunca 40P01 ni 500).
+# - Dos altas simultaneas del mismo vehiculo (ambas 201).
+# - Atomicidad con falla inyectada en el historial y en los items (no queda la orden ni sus items; el stock
+#   y movimiento_stock no cambian).
+# - Consultas constantes: 1 y 5 items emiten las mismas sentencias, un solo INSERT INTO item_orden, ids
+#   como parametros, FOR UPDATE en el vehiculo y FOR SHARE en los repuestos.
+# - /openapi.json (cuerpo con additionalProperties false, respuesta con los campos de OrdenDetalleSalida, sin
+#   password_hash ni borrado_en) e invariantes de ordenes, historial y stock sobre todas las filas.
+#
+# Escenario -> caso: acceso 32-36; contrato 37-57; negocio 58-64; alta 65-75; catalogo 22-31;
+# invariantes 76-79.
