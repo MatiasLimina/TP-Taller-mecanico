@@ -10,6 +10,11 @@ from app.core.database import create_engine, create_session_factory
 from app.core.dependencies import exigir_password_al_dia
 from app.core.errores import registrar_manejadores
 from app.core.security import crear_hash_ficticio
+from app.modules.clientes.router import (
+    router_clientes,
+    router_mis_vehiculos,
+    router_vehiculos,
+)
 from app.modules.health.router import router as health_router
 from app.modules.repuestos.router import router_admin_repuestos, router_catalogo
 from app.modules.usuarios.router import router as auth_router
@@ -44,12 +49,15 @@ rutas_abiertas.include_router(auth_router)
 # `app.include_router(rutas_protegidas)`: `include_router` copia las rutas en ese momento y lo
 # que se agregue después no queda montado. C-09: personal, roles de un usuario y eventos
 # (sólo ADMIN); C-11: catálogo de repuestos (lectura: ADMIN, RECEPCION y MECANICO; escritura: sólo
-# ADMIN); C-10 y los siguientes suman los suyos.
+# ADMIN); C-10: clientes, vehículos y mis-vehículos; los siguientes suman los suyos.
 rutas_protegidas = APIRouter(dependencies=[Depends(exigir_password_al_dia)])
 rutas_protegidas.include_router(router_personal)
 rutas_protegidas.include_router(router_eventos)
 rutas_protegidas.include_router(router_catalogo)
 rutas_protegidas.include_router(router_admin_repuestos)
+rutas_protegidas.include_router(router_clientes)
+rutas_protegidas.include_router(router_vehiculos)
+rutas_protegidas.include_router(router_mis_vehiculos)
 
 app.include_router(rutas_abiertas)
 app.include_router(rutas_protegidas)
