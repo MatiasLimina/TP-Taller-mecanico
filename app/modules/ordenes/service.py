@@ -16,14 +16,24 @@ sólo al terminar una orden (C-14), por el punto único de escritura de `repuest
 """
 
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 from decimal import Decimal
 
-from app.modules.ordenes.models import CodigoEstado, OrdenTrabajo
+from sqlalchemy.exc import IntegrityError
+
+from app.core.errores import Conflicto, EntradaInvalida, restriccion_violada
+from app.modules.ordenes.models import (
+    CodigoEstado,
+    HistorialEstadoOrden,
+    ItemOrden,
+    OrdenTrabajo,
+)
 from app.modules.ordenes.schemas import (
     EstadoOrdenSalida,
     HistorialEstadoSalida,
     ItemAltaEntrada,
     ItemOrdenSalida,
+    OrdenAltaEntrada,
     OrdenDetalleSalida,
 )
 from app.modules.ordenes.unit_of_work import OrdenesUoW
@@ -83,6 +93,84 @@ def armar_detalle(orden: OrdenTrabajo) -> OrdenDetalleSalida:
         ],
         historial=[HistorialEstadoSalida.model_validate(h) for h in orden.historial],
     )
+
+
+async def alta(uow: OrdenesUoW, datos: OrdenAltaEntrada, usuario_id: int) -> OrdenDetalleSalida:
+    """Alta atómica de una orden `PENDIENTE` con sus ítems y su primera línea de historial.
+
+    Todos los rechazos de negocio se deciden ANTES de escribir, con mensaje propio (RN16, RN19):
+    una excepción que sale del bloque revierte y libera los bloqueos, y no queda ni orden, ni
+    ítems, ni historial. Después del primer `add` ningún paso falla por regla de negocio: el
+    vehículo y los repuestos están bloqueados y nunca se borran físicamente, y el contrato impide
+    el resto; si aun así una restricción de la base saltara, el manejador global responde un
+    409/422 genérico (nunca 500 ni texto de la base).
+
+    El precio de cada ítem se COPIA del repuesto leído bajo `FOR SHARE` y el total se calcula acá
+    (RN10): el cliente no manda ninguno. `creada_en` y el `cuando` del historial son el MISMO
+    instante (S-12). No toca `stock` ni crea movimientos (RN14, S-17): el stock se valida y baja
+    al terminar la orden (C-14).
+    """
+    try:
+        async with uow:
+            if await uow.estados.get_por_codigo(ESTADO_INICIAL.value) is None:  # RN19
+                raise Conflicto(MENSAJE_CATALOGO_SIN_ESTADO_INICIAL)
+            # Orden de bloqueo (design D6): vehículo FOR UPDATE -> repuestos FOR SHARE ascendentes.
+            vehiculo = await uow.vehiculos.get_vigente_para_actualizar(datos.vehiculo_id)
+            if vehiculo is None:
+                raise Conflicto(
+                    MENSAJE_VEHICULO_NO_DISPONIBLE.format(vehiculo_id=datos.vehiculo_id)
+                )
+            pedidos = [i.repuesto_id for i in datos.items]
+            repuestos = await uow.repuestos.listar_vigentes_para_orden(pedidos)
+            precios = {r.id: r.precio for r in repuestos if r.id is not None}
+            faltantes = sorted(set(pedidos) - precios.keys())
+            if faltantes:
+                raise Conflicto(
+                    MENSAJE_REPUESTOS_NO_DISPONIBLES.format(ids=", ".join(map(str, faltantes)))
+                )
+            total = calcular_total(datos.items, precios)
+            if total > TOTAL_MAXIMO:
+                raise EntradaInvalida(MENSAJE_TOTAL_EXCEDIDO)
+            ahora = datetime.now(UTC)
+            orden = await uow.ordenes.add(
+                OrdenTrabajo(  # sin mecanico_id: lo asigna `iniciar` (C-14)
+                    vehiculo_id=datos.vehiculo_id,
+                    estado=ESTADO_INICIAL.value,
+                    falla=datos.falla,
+                    total=total,
+                    creada_en=ahora,
+                )
+            )
+            assert orden.id is not None
+            await uow.items.add_varios(
+                [  # en el orden del cuerpo: los ids crecen en ese orden
+                    ItemOrden(
+                        orden_id=orden.id,
+                        repuesto_id=i.repuesto_id,
+                        cantidad=i.cantidad,
+                        precio_unitario=precios[i.repuesto_id],
+                    )
+                    for i in datos.items
+                ]
+            )
+            await uow.historial.add(
+                HistorialEstadoOrden(
+                    orden_id=orden.id,
+                    desde_estado=None,
+                    hasta_estado=ESTADO_INICIAL.value,
+                    usuario_id=usuario_id,
+                    cuando=ahora,
+                )
+            )
+            detalle = await uow.ordenes.get_detalle(orden.id)
+            assert detalle is not None
+            salida = armar_detalle(detalle)  # dentro del bloque, con todo precargado
+    except IntegrityError as exc:
+        if restriccion_violada(exc) in RESTRICCIONES_DE_ESTADO:
+            # El catálogo cambió por psql entre la verificación y el INSERT (RN19).
+            raise Conflicto(MENSAJE_CATALOGO_SIN_ESTADO_INICIAL) from None
+        raise
+    return salida
 
 
 async def listar_estados(uow: OrdenesUoW) -> list[EstadoOrdenSalida]:

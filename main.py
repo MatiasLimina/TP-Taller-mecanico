@@ -16,7 +16,7 @@ from app.modules.clientes.router import (
     router_vehiculos,
 )
 from app.modules.health.router import router as health_router
-from app.modules.ordenes.router import router_estados
+from app.modules.ordenes.router import router_estados, router_ordenes
 from app.modules.repuestos.router import router_admin_repuestos, router_catalogo
 from app.modules.usuarios.router import router as auth_router
 from app.modules.usuarios.router import router_eventos, router_personal
@@ -60,6 +60,7 @@ rutas_protegidas.include_router(router_admin_repuestos)
 rutas_protegidas.include_router(router_clientes)
 rutas_protegidas.include_router(router_vehiculos)
 rutas_protegidas.include_router(router_mis_vehiculos)
+rutas_protegidas.include_router(router_ordenes)
 rutas_protegidas.include_router(router_estados)
 
 app.include_router(rutas_abiertas)
