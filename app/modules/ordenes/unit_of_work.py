@@ -9,8 +9,8 @@ necesita dentro de la MISMA transacción: el `VehiculoRepository` de clientes (b
 vehículo, C-10) y el `RepuestoRepository` y el `MovimientoStockRepository` de repuestos (lectura
 `FOR SHARE` de los repuestos pedidos, y los dos que el punto único de escritura de stock necesita) y
 el `AsignacionRolRepository` de usuarios (roles vigentes del actor para el permiso de terminar y
-cancelar, RN04, C-14 S-03). No reutiliza ni abre `ClientesUoW`, `RepuestosUoW` ni `UsuariosUoW`:
-nunca hay dos Unit of Work abiertos.
+cancelar, RN04, C-14 S-03). No reutiliza ni abre `ClientesUoW` ni `RepuestosUoW` (tampoco el de
+usuarios): nunca hay dos Unit of Work abiertos.
 
 Cumple el protocolo `ConStock` (`repuestos` y `movimientos`) de `app/modules/repuestos/service.py`:
 C-14 llama `aplicar_movimientos_stock(uow, …)` dentro del bloque que abre su servicio. C-13 no lo

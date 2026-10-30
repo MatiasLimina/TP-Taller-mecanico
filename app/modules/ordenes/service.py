@@ -22,7 +22,7 @@ catálogo) -> escribir (`terminar` descuenta el stock) -> releer el detalle con 
 armar la salida. Orden de bloqueo (design D3): la orden, después los repuestos por id ascendente
 (sólo por el punto único de stock); nunca un vehículo. El stock cambia ÚNICAMENTE por
 `aplicar_movimientos_stock` y `StockInsuficiente` no se captura dentro del bloque: sale y el Unit of
-Work revierte todo (RN13). El servicio no conoce `BackgroundTasks`: el aviso al cliente lo agenda el
+Work revierte todo (RN13). El servicio no conoce las tareas en segundo plano de FastAPI: el aviso al cliente lo agenda el
 router DESPUÉS de que `terminar` vuelve (es decir, después del commit).
 """
 
@@ -422,8 +422,8 @@ async def terminar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDeta
 
 
 async def avisar_orden_terminada(orden_id: int, patente: str) -> None:
-    """Aviso SIMULADO al cliente (DD-10): lo corre `BackgroundTasks` DESPUÉS de enviar la respuesta
+    """Aviso SIMULADO al cliente (DD-10): lo corre FastAPI como tarea en segundo plano DESPUÉS de enviar la respuesta
     y sólo si `terminar` confirmó. Recibe valores (nunca entidades ni la sesión, ya cerrada); la
-    línea no lleva nombre, correo ni teléfono del cliente. `asyncio.sleep`, nunca `time.sleep`."""
+    línea no lleva nombre, correo ni teléfono del cliente. Espera con `asyncio.sleep`: nunca una pausa que bloquee el bucle de eventos."""
     await asyncio.sleep(DEMORA_AVISO_SEGUNDOS)
     logger_avisos.info(MENSAJE_AVISO.format(orden_id=orden_id, patente=patente))
