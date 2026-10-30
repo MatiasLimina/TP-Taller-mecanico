@@ -22,8 +22,10 @@
 #   DELETE FROM usuario WHERE email LIKE '%@personal.example.com';
 #
 # Los correos y documentos de este archivo son unicos: el archivo es de una sola
-# pasada sobre ese estado. Si C-06 (seed) ya existe, correr `python seed.py` antes y
-# luego el bloque de arriba. GET /eventos lista TODO el historial: los totales se
+# pasada sobre ese estado. Con el seed (C-06): `python seed.py`; después
+# `UPDATE asignacion_rol SET revocada_en = now() WHERE rol = 'ADMIN' AND revocada_en IS NULL;`
+# (el caso 62 exige que jefa sea el único ADMIN vigente sin vencimiento y el seed crea dos;
+# `asignacion_rol` no es de sólo agregado); después el bloque de limpieza de arriba. GET /eventos lista TODO el historial: los totales se
 # comparan con SELECT count(*) FROM evento_seguridad, no con un numero fijo.
 #
 # Reutilizar una sesion: `Cookie: {{loginJefa.response.headers.Set-Cookie}}` (todas las

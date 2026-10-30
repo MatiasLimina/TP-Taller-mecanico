@@ -1,0 +1,211 @@
+# =============================================================================
+# test/seed.http -- Casos de C-06 seed-script
+#   (login de los 7 usuarios del seed, roles vigentes en GET /auth/yo,
+#    bloqueo por cambio de contrasena pendiente, evento SISTEMA en GET /eventos)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+#
+# ESTADO CONOCIDO: `python seed.py` inmediatamente antes; las contrasenas son
+# las de prueba de `seed.py` (`ClaveSegura1` para los usuarios 1..6 y
+# `Provisoria1` para `nuevo@example.com`).
+#
+# Ningun caso escribe datos salvo `intento_acceso`: los logins no dejan linea
+# en `evento_seguridad`.
+#
+# Reutilizar una sesion: `Cookie: {{<name>.response.headers.Set-Cookie}}` (todas
+# las peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Login de los 7 usuarios del seed (casos 1-7)
+# =============================================================================
+
+### 1. Login de admin@example.com
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+#   y {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginAdmin
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 2. Login de admin2@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginAdmin2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin2@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 3. Login de recepcion@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 4. Login de mecanico@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 5. Login de mecanico2@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginMecanico2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico2@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 6. Login de cliente@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginCliente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cliente@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 7. Login de nuevo@example.com (contrasena provisoria)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": true, "expira_en_segundos": 1800}
+# @name loginNuevo
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nuevo@example.com",
+  "password": "Provisoria1"
+}
+
+# =============================================================================
+# B. Perfil y roles vigentes de cada usuario (casos 8-14)
+# =============================================================================
+
+### 8. Perfil de admin@example.com
+# Esperado: 200 con {id: 1, email: "admin@example.com", nombre: "Adriana Admin",
+#   debe_cambiar_password: false, roles_vigentes: ["ADMIN"], roles_token: ["ADMIN"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 9. Perfil de admin2@example.com
+# Esperado: 200 con {id: 2, email: "admin2@example.com", nombre: "Alberto Admin",
+#   debe_cambiar_password: false, roles_vigentes: ["ADMIN"], roles_token: ["ADMIN"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginAdmin2.response.headers.Set-Cookie}}
+
+### 10. Perfil de recepcion@example.com
+# Esperado: 200 con {id: 3, email: "recepcion@example.com", nombre: "Rita Recepción",
+#   debe_cambiar_password: false, roles_vigentes: ["RECEPCION"], roles_token: ["RECEPCION"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 11. Perfil de mecanico@example.com
+# Esperado: 200 con {id: 4, email: "mecanico@example.com", nombre: "Mario Mecánico",
+#   debe_cambiar_password: false, roles_vigentes: ["MECANICO"], roles_token: ["MECANICO"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 12. Perfil de mecanico2@example.com
+# Esperado: 200 con {id: 5, email: "mecanico2@example.com", nombre: "Marta Mecánica",
+#   debe_cambiar_password: false, roles_vigentes: ["MECANICO"], roles_token: ["MECANICO"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 13. Perfil de cliente@example.com
+# Esperado: 200 con {id: 6, email: "cliente@example.com", nombre: "Laura Martínez",
+#   debe_cambiar_password: false, roles_vigentes: ["CLIENTE"], roles_token: ["CLIENTE"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 14. Perfil de nuevo@example.com (ruta /auth/yo permite sesion con cambio pendiente)
+# Esperado: 200 con {id: 7, email: "nuevo@example.com", nombre: "Nicolás Nuevo",
+#   debe_cambiar_password: true, roles_vigentes: ["MECANICO"], roles_token: ["MECANICO"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Evento SISTEMA, bloqueo por cambio pendiente y control de rol (casos 15-17)
+# =============================================================================
+
+### 15. Historial de eventos con loginAdmin (unico evento SISTEMA de la carga inicial)
+# Esperado: 200 con {items: [{id: 1, cuando: "...", actor: "SISTEMA",
+#   accion: "Carga de los datos iniciales"}], total: 1, page: 1, size: 20, pages: 1}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 16. Ruta protegida con loginNuevo (cambio de contrasena pendiente)
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+### 17. Ruta de ADMIN con loginRecepcion (sin permiso)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# D. Normalizacion de correo en login y rechazo de contrasena incorrecta (casos 18-19)
+# =============================================================================
+
+### 18. Login con mayusculas en el correo (la API normaliza; el seed guardo minusculas)
+# Esperado: 200 con debe_cambiar_password: false
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "Admin@Example.com",
+  "password": "ClaveSegura1"
+}
+
+### 19. Login con contrasena incorrecta
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "Otra-clave1"
+}

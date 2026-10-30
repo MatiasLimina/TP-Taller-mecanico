@@ -21,6 +21,10 @@
 #   INSERT INTO cliente (nombre, documento, telefono)
 #     VALUES ('Jorge Sin Usuario', '20111222', '1155550000');
 #
+# Con el seed (C-06): `python seed.py` y después SOLO el `INSERT` de Jorge Sin Usuario de abajo;
+# NO correr los `DELETE` (el seed ya vació la base y `LIKE '%@example.com'` alcanzaría a los
+# usuarios del seed, que tienen órdenes y movimientos).
+#
 # Los correos y documentos de este archivo son unicos: el archivo es de una sola
 # pasada sobre ese estado. La contrasena valida de todos los usuarios es ClaveSegura1.
 # (Una base de dev con un usuario ya registrado con esos correos o documentos da 409 donde
