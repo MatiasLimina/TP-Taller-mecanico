@@ -8,7 +8,9 @@ Orden de bloqueo de filas (design C-13 D6), que respetan los servicios de órden
 los de clientes y repuestos que ya lo cumplen: 1) una orden existente (`FOR UPDATE`, C-14);
 2) el vehículo (`FOR UPDATE`, C-10 baja y C-13 alta); 3) los repuestos en orden ascendente de id
 (`FOR SHARE` en el alta, `FOR UPDATE` en PATCH/DELETE y `UPDATE` condicional en el punto único de
-stock). Nunca se vuelve atrás: sin ciclos de espera, sin interbloqueos.
+stock). Nunca se vuelve atrás: sin ciclos de espera, sin interbloqueos. C-14: `get_para_actualizar`
+es el paso 1 y la primera sentencia con bloqueo de iniciar, terminar y cancelar; ninguna transición
+bloquea un vehículo ni lee un repuesto con bloqueo antes de la orden.
 
 `historial_estado_orden` es de sólo agregado (RN15, C-04): su repositorio solo se usa con `add()`;
 nunca `update` ni `delete`. El catálogo `estado_orden` es de sólo lectura (RN19): lo carga el seed
@@ -22,7 +24,7 @@ from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.repository import BaseRepository
-from app.modules.clientes.models import Vehiculo
+from app.modules.clientes.models import Cliente, Vehiculo
 from app.modules.ordenes.models import (
     EstadoOrden,
     HistorialEstadoOrden,
@@ -77,6 +79,36 @@ class OrdenTrabajoRepository(BaseRepository[OrdenTrabajo]):
         )
         return (await self.session.exec(consulta)).unique().first()
 
+    async def get_para_actualizar(self, id: int) -> OrdenTrabajo | None:
+        """Orden bloqueada con `FOR UPDATE`, sin relaciones (C-14).
+
+        Es el paso 1 del orden global de bloqueo y la PRIMERA fila que toma toda transición:
+        serializa dos transiciones sobre la misma orden (la segunda espera sin tener nada
+        bloqueado y, al seguir, ve el estado confirmado). `populate_existing` hace que la fila
+        bloqueada pise cualquier valor viejo del identity map.
+        """
+        consulta = (
+            self._consulta_base()
+            .where(col(OrdenTrabajo.id) == id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return (await self.session.exec(consulta)).first()
+
+    async def get_usuario_dueno(self, orden_id: int) -> int | None:
+        """`cliente.usuario_id` del vehículo de la orden, o None si la ficha no tiene usuario.
+
+        Cuenta también si el vehículo está dado de baja (RN16). Devuelve None además cuando la
+        orden no existe. Columna suelta, sin bloqueo y sin entidades en el identity map.
+        """
+        consulta = (
+            select(col(Cliente.usuario_id))
+            .join(Vehiculo, col(Vehiculo.cliente_id) == col(Cliente.id))
+            .join(OrdenTrabajo, col(OrdenTrabajo.vehiculo_id) == col(Vehiculo.id))
+            .where(col(OrdenTrabajo.id) == orden_id)
+        )
+        return (await self.session.exec(consulta)).first()
+
 
 class ItemOrdenRepository(BaseRepository[ItemOrden]):
     def __init__(self, session: AsyncSession) -> None:
@@ -88,6 +120,19 @@ class ItemOrdenRepository(BaseRepository[ItemOrden]):
         self.session.add_all(items)
         await self.session.flush()
         return list(items)
+
+    async def listar_de_orden(self, orden_id: int) -> list[ItemOrden]:
+        """Ítems de la orden en orden de id, sin relaciones (usa `uq_item_orden_orden_id_repuesto_id`).
+
+        Una sola consulta para cualquier cantidad de ítems. No los bloquea: no hay ruta que los
+        edite y la orden padre ya está bloqueada.
+        """
+        consulta = (
+            self._consulta_base()
+            .where(col(ItemOrden.orden_id) == orden_id)
+            .order_by(col(ItemOrden.id))
+        )
+        return list((await self.session.exec(consulta)).all())
 
 
 class HistorialEstadoOrdenRepository(BaseRepository[HistorialEstadoOrden]):
