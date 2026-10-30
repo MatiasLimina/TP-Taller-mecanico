@@ -31,7 +31,7 @@ no es entero o está fuera de 1..INT4). Orden de los rechazos:
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends
 
 from app.core.dependencies import UsuarioActualDep, requiere_rol
 from app.core.schemas import IdRuta
@@ -78,3 +78,14 @@ async def cancelar(
     orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep
 ) -> OrdenDetalleSalida:
     return await service.cancelar(uow, orden_id, actual.id)
+
+
+@router_ordenes.post("/{orden_id}/terminar", status_code=200)
+async def terminar(
+    orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep, tareas: BackgroundTasks
+) -> OrdenDetalleSalida:
+    salida = await service.terminar(uow, orden_id, actual.id)  # al volver, YA confirmó
+    # Recién ahora se agenda el aviso (corre después de la respuesta): si el servicio lanzó
+    # (403/404/409), esta línea no se ejecuta. Se llama por el módulo, no por import directo.
+    tareas.add_task(service.avisar_orden_terminada, salida.id, salida.patente)
+    return salida

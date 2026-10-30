@@ -26,6 +26,7 @@ Work revierte todo (RN13). El servicio no conoce `BackgroundTasks`: el aviso al 
 router DESPUÉS de que `terminar` vuelve (es decir, después del commit).
 """
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
@@ -56,6 +57,7 @@ from app.modules.ordenes.schemas import (
     OrdenDetalleSalida,
 )
 from app.modules.ordenes.unit_of_work import OrdenesUoW
+from app.modules.repuestos.service import MovimientoPedido, aplicar_movimientos_stock
 from app.modules.usuarios.models import Rol
 
 ESTADO_INICIAL = CodigoEstado.PENDIENTE
@@ -370,3 +372,58 @@ async def cancelar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDeta
         _traducir_catalogo(exc, destino)
         raise
     return salida
+
+
+async def terminar(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetalleSalida:
+    """EN_REPARACION -> TERMINADA: descuenta el stock de cada ítem y deja todo o nada (RN13, RN14).
+
+    Orden de los rechazos: 404 -> 403 (ni el mecánico asignado con MECANICO vigente, ni ADMIN;
+    antes que el estado, S-04/S-06) -> 409 de estado -> 409 de stock. Stock, movimientos, estado e
+    historial se escriben en la MISMA transacción: si falta stock (o falla cualquier otra cosa), la
+    excepción sale del bloque y el Unit of Work revierte TODO, también los descuentos de los ítems
+    anteriores. `StockInsuficiente` no se captura (su mensaje de C-11 ya es el del PDF).
+
+    El descuento es sólo por el punto único de escritura de stock, con `incluir_bajas=True`: un
+    repuesto dado de baja después del alta se descuenta igual (S-11, RN16). El movimiento lo firma
+    el actor que terminó (el mecánico o el ADMIN), con el motivo `Orden #<id> terminada` (S-12).
+    El aviso al cliente NO se agenda acá: lo agenda el router cuando este servicio vuelve (commit).
+    """
+    destino = CodigoEstado.TERMINADA
+    try:
+        async with uow:
+            orden = await _bloquear_orden(uow, orden_id)  # paso 1 — 404
+            roles = await _roles_vigentes(uow, usuario_id)
+            asignado = orden.mecanico_id == usuario_id and Rol.MECANICO.value in roles
+            if not (asignado or Rol.ADMIN.value in roles):
+                raise SinPermiso(MENSAJE_SIN_PERMISO_TERMINAR)  # 403 antes que 409
+            await _exigir_transicion(uow, orden, destino)  # 409 de estado
+            assert orden.id is not None
+            items = await uow.items.listar_de_orden(orden.id)
+            if items:  # siempre >= 1 (C-13); defensivo ante una orden cargada por psql
+                await aplicar_movimientos_stock(  # paso 3 — PUNTO ÚNICO de escritura de stock
+                    uow,
+                    [
+                        MovimientoPedido(
+                            i.repuesto_id,
+                            -i.cantidad,
+                            MOTIVO_ORDEN_TERMINADA.format(orden_id=orden.id),
+                            orden_id=orden.id,
+                        )
+                        for i in items
+                    ],
+                    usuario_id=usuario_id,
+                    incluir_bajas=True,
+                )  # `StockInsuficiente` NO se captura
+            salida = await _aplicar_transicion(uow, orden, destino, usuario_id)
+    except IntegrityError as exc:
+        _traducir_catalogo(exc, destino)
+        raise
+    return salida  # confirmado
+
+
+async def avisar_orden_terminada(orden_id: int, patente: str) -> None:
+    """Aviso SIMULADO al cliente (DD-10): lo corre `BackgroundTasks` DESPUÉS de enviar la respuesta
+    y sólo si `terminar` confirmó. Recibe valores (nunca entidades ni la sesión, ya cerrada); la
+    línea no lleva nombre, correo ni teléfono del cliente. `asyncio.sleep`, nunca `time.sleep`."""
+    await asyncio.sleep(DEMORA_AVISO_SEGUNDOS)
+    logger_avisos.info(MENSAJE_AVISO.format(orden_id=orden_id, patente=patente))
