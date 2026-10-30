@@ -67,7 +67,7 @@ GATE 3: C-07 ✓
 
 GATE 4: C-08 ✓                          ← FORK
   → C-09 roles-personal-eventos         [hecho]
-  → C-10 clientes-vehiculos
+  → C-10 clientes-vehiculos            [hecho]
   → C-11 repuestos-catalogo            [hecho]
 
 GATE 5: C-11 ✓
@@ -272,7 +272,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 > C-10 y C-11 (y luego C-12) son independientes entre sí; corren en paralelo tras C-08.
 
 ### [C-10] `clientes-vehiculos`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Módulo `clientes` (+ `Vehiculo`, `SoftDeleteRepository`): `POST /clientes` (RECEPCION, ADMIN; documento repetido → 409), `GET /clientes/{id}` con vehículos (eager loading), `POST /clientes/{id}/vehiculos` (patente vigente repetida → 409; `anio` 1950-2100)
   - `DELETE /vehiculos/{id}` → 204 baja lógica; 409 si tiene órdenes abiertas (estado no final según `es_final`, RN16); patente reutilizable tras la baja
@@ -406,4 +406,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-29)**: C-01…C-05, C-07…C-09 y C-11 completados; C-06 y C-10 propuestos; próximo: C-12.
+**Estado (2026-10-30)**: C-01…C-05, C-07…C-11 completados; C-06 propuesto; próximos: C-12 y C-13 (C-13 desbloqueado: C-10 y C-11 ✓).
