@@ -56,6 +56,7 @@ Organizadas por épica. Los criterios derivan de los ejercicios y casos de prueb
 ### US-050 — Alta de orden (RN10, RN19) — C-10
 - [ ] Cuerpo `{vehiculo_id, falla, items[{repuesto_id, cantidad}]}`; respuesta con precios copiados, total y primer historial
 - [ ] Repuesto inexistente → 409 y no queda orden; catálogo vacío → 409 propio
+- [ ] Vehículo o repuesto inexistente o dado de baja → 409 con mensaje propio (no 404); la respuesta tiene la forma completa de detalle del ejemplo de la consigna
 ### US-051 — Iniciar / terminar / cancelar (RN11–RN13) — C-11, C-12, C-13
 - [ ] Iniciar (mecánico queda asignado); terminar descuenta stock + movimientos + historial atómicamente; falta de stock → 409 sin cambios; aviso por `BackgroundTasks` sólo si hubo commit
 - [ ] Cancelar: dueño / recepción / admin; 403 antes que 409; ajena → 403; terminada → 409
