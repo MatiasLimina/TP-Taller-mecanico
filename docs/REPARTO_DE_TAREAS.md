@@ -36,7 +36,7 @@ C-01 a C-09 ya están cerrados.
 | C-07 | auth-registro-login | CRITICO | Mati | Mati | ✓ |
 | C-08 | auth-session-guards | CRITICO | Mati | Mati | ✓ |
 | C-09 | roles-personal-eventos | CRITICO | Mati | Mati | ✓ |
-| C-10 | clientes-vehiculos | MEDIO | Nico | **Lauti** | pendiente |
+| C-10 | clientes-vehiculos | MEDIO | Nico | **Lauti** | ✓ |
 | C-11 | repuestos-catalogo | MEDIO | Nico | **Mati** | ✓ |
 | C-12 | repuestos-stock-precios | ALTO | Nico | **Mati** | pendiente |
 | C-13 | ordenes-alta-estados | ALTO | Nico | **Nico** (revisión de Mati) | pendiente |
@@ -48,7 +48,7 @@ C-01 a C-09 ya están cerrados.
 |------------|----------------------|--------------------|-------------------------------|
 | **Mati** | — | C-12 | ALTO (ya hizo los CRITICO de auth) |
 | **Nico** | C-10…C-16 | C-13, C-14 | CRITICO (C-14, con revisión de Mati) |
-| **Lauti** | — | C-06, C-10, C-15, C-16 | MEDIO |
+| **Lauti** | — | C-06, C-15, C-16 | MEDIO |
 
 ## 4. Detalle por integrante (lo que falta)
 
