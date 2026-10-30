@@ -29,6 +29,7 @@ Cliente → Router → Service → [sesión propia: intento_acceso]
 
 ## Flujo 4: Alta de orden (RN10, RN19)
 `POST /ordenes` (RECEPCION/ADMIN) → DTO sin precio/total/estado → UoW: verifica catálogo no vacío, vehículo vigente, repuestos vigentes; copia `precio_unitario`; calcula `total`; crea orden PENDIENTE + ítems + historial (`null → PENDIENTE`). Repuesto inexistente/baja → 409, nada queda.
+- Orden de bloqueos del alta (C-13): vehículo `FOR UPDATE` (lo bloquea también la baja de C-10) → repuestos `FOR SHARE` en orden ascendente de id; los precios se copian dentro de esa transacción.
 
 ## Flujo 5: Terminar orden (RN11, RN13, RN14) — C-11, C-12
 **Actor:** mecánico asignado o ADMIN
