@@ -484,3 +484,18 @@ async def detalle_orden(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> Orde
             raise SinPermiso(MENSAJE_SIN_PERMISO_VER)
         salida = armar_detalle(orden)  # dentro del bloque, con todo precargado
     return salida
+
+
+async def mis_ordenes(
+    uow: OrdenesUoW, pag: Paginacion, usuario_id: int
+) -> Pagina[OrdenResumenSalida]:
+    """Órdenes de los vehículos propios (RN17); el filtro es SIEMPRE el usuario de la sesión.
+    Sin ficha o sin vehículos: página vacía."""
+    async with uow:
+        total = await uow.ordenes.contar_de_usuario(usuario_id)
+        verificar_pagina(pag, total)
+        ordenes = await uow.ordenes.listar_resumen_de_usuario(
+            usuario_id, offset=pag.offset, limit=pag.size
+        )
+        items = [armar_resumen(o) for o in ordenes]
+    return armar_pagina(items, total, pag)

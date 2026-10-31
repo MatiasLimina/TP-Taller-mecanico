@@ -99,6 +99,8 @@ async def terminar(
 lectura_ordenes = requiere_rol(Rol.RECEPCION, Rol.ADMIN, Rol.MECANICO)  # UNA función (C-15)
 FiltroEstado = Annotated[CodigoEstado | None, Query()]
 
+router_mis_ordenes = APIRouter(prefix="/mis-ordenes", tags=["ordenes"])
+
 
 @router_ordenes.get("", dependencies=[Depends(lectura_ordenes)])
 async def listar_ordenes(
@@ -112,3 +114,10 @@ async def detalle_orden(
     orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep
 ) -> OrdenDetalleSalida:
     return await service.detalle_orden(uow, orden_id, actual.id)
+
+
+@router_mis_ordenes.get("")
+async def mis_ordenes(
+    pag: PaginacionDep, actual: UsuarioActualDep, uow: OrdenesUoWDep
+) -> Pagina[OrdenResumenSalida]:
+    return await service.mis_ordenes(uow, pag, actual.id)
