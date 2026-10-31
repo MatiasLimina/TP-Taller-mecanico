@@ -16,6 +16,8 @@ Salida (heredan `SalidaBase`): `OrdenDetalleSalida` tiene la forma y el orden de
 ejemplo de la consigna (S-05) y la reutilizan el alta y, en C-15, `GET /ordenes/{id}`. Los
 `Decimal` salen como texto (`"68000.00"`, Pydantic v2), igual que `RepuestoSalida.precio`.
 `EstadoOrdenSalida` es una fila del catálogo (S-14). Las clases anidadas se definen antes.
+
+`OrdenResumenSalida` (C-15) es un elemento de `GET /ordenes` y `GET /mis-ordenes`: la cabecera del detalle, sin ítems ni historial; lo arma `service.armar_resumen` desde una orden con el vehículo y su cliente precargados.
 """
 
 from datetime import datetime
@@ -96,3 +98,14 @@ class EstadoOrdenSalida(SalidaBase):
     descripcion: str
     posicion: int
     es_final: bool
+
+
+class OrdenResumenSalida(SalidaBase):
+    id: int
+    estado: str
+    patente: str
+    total: Decimal
+    creada_en: datetime
+    mecanico_id: int | None
+    falla: str
+    cliente: str
