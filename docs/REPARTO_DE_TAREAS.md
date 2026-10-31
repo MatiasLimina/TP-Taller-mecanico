@@ -41,7 +41,7 @@ C-01 a C-09 ya están cerrados.
 | C-12 | repuestos-stock-precios | ALTO | Nico | **Mati** | ✓ |
 | C-13 | ordenes-alta-estados | ALTO | Nico | **Nico** (revisión de Mati) | ✓ |
 | C-14 | ordenes-transiciones | CRITICO | Nico | **Nico** (revisión de Mati) | ✓ |
-| C-15 | ordenes-lecturas-sin-n-plus-1 | MEDIO | Nico | **Lauti** | pendiente |
+| C-15 | ordenes-lecturas-sin-n-plus-1 | MEDIO | Nico | **Lauti** | ✓ |
 | C-16 | verificacion-http-readme | BAJO | Nico | **Lauti** (cierre) + cada uno los `.http` de su módulo (ver §6) | pendiente |
 
 | Integrante | `propose` pendientes | `apply` pendientes | Governance máx. que implementa |

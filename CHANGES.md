@@ -76,7 +76,7 @@ GATE 5: C-11 ✓
 
 GATE 6: C-13 ✓ (y C-12 ✓)
   → C-14 ordenes-transiciones           [hecho]
-  → C-15 ordenes-lecturas-sin-n-plus-1
+  → C-15 ordenes-lecturas-sin-n-plus-1  [hecho]
 
 GATE 7: C-06, C-09, C-14, C-15 ✓
   → C-16 verificacion-http-readme
@@ -357,11 +357,12 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/10_preguntas_abiertas.md` IN-04
 
 ### [C-15] `ordenes-lecturas-sin-n-plus-1`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `GET /ordenes?estado&page&size` (personal; estado inválido → 422; `total` con los mismos filtros)
   - `GET /ordenes/{id}`: **reutiliza `OrdenTrabajoRepository.get_detalle` y `service.armar_detalle` de C-13** (precarga con `selectinload`/`joinedload` ya hecha ahí) y agrega el permiso (personal o dueño, 403/404) y la evidencia del caso PDF C15: número fijo de consultas (2 vs 4 ítems → mismas consultas; log con `SQL_ECHO=true`)
-  - `GET /mis-ordenes?page&size` (autenticado, sólo órdenes de sus vehículos, RN17). Caso PDF C17
+  - `GET /mis-ordenes?page&size` (autenticado, sólo órdenes de sus vehículos, RN17)
+  - Caso PDF C-17: `GET /estados-orden` + `GET /ordenes?estado=<no declarado>` → 422; sin sesión → 401
   - Sin carga perezosa ni llamadas bloqueantes en handlers (Ej.8)
 - **Dependencias**: `C-13`
 - **Governance**: MEDIO
@@ -407,4 +408,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-30)**: C-01…C-14 completados; próximos: propose de C-15 y C-16.
+**Estado (2026-10-31)**: C-01…C-15 completados; próximo: propose de C-16.
