@@ -105,3 +105,10 @@ async def listar_ordenes(
     pag: PaginacionDep, uow: OrdenesUoWDep, estado: FiltroEstado = None
 ) -> Pagina[OrdenResumenSalida]:
     return await service.listar_ordenes(uow, pag, estado)
+
+
+@router_ordenes.get("/{orden_id}")
+async def detalle_orden(
+    orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep
+) -> OrdenDetalleSalida:
+    return await service.detalle_orden(uow, orden_id, actual.id)

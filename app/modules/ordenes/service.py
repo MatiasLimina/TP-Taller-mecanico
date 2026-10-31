@@ -464,3 +464,23 @@ async def listar_ordenes(
         ordenes = await uow.ordenes.listar_resumen(filtro, offset=pag.offset, limit=pag.size)
         items = [armar_resumen(o) for o in ordenes]
     return armar_pagina(items, total, pag)
+
+
+async def detalle_orden(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetalleSalida:
+    """Detalle para el personal o el dueño del vehículo: 404 antes que 403 (C-14 S-07).
+
+    Reutiliza `get_detalle` (3 SELECT fijos) y `armar_detalle` de C-13. Los roles se leen en la
+    base en el mismo bloque (RN04), siempre: 5 sentencias por petición con cualquier cantidad
+    de ítems. El dueño es el usuario de la ficha del cliente del vehículo, ya precargada,
+    también si el vehículo está dado de baja (C-14 S-08). Sólo lectura: sin bloqueos.
+    """
+    async with uow:
+        orden = await uow.ordenes.get_detalle(orden_id)
+        if orden is None:
+            raise NoEncontrado(MENSAJE_ORDEN_INEXISTENTE)  # 404 antes que el permiso
+        roles = await _roles_vigentes(uow, usuario_id)
+        es_personal = not roles.isdisjoint(ROLES_DE_PERSONAL)
+        if not es_personal and orden.vehiculo.cliente.usuario_id != usuario_id:
+            raise SinPermiso(MENSAJE_SIN_PERMISO_VER)
+        salida = armar_detalle(orden)  # dentro del bloque, con todo precargado
+    return salida
