@@ -4,6 +4,8 @@ API web asincrónica para la gestión integral de un taller mecánico (Programac
 
 ## 1. Integrantes del equipo
 
+**Nombre del grupo:** GordosProgramacion
+
 | Integrante | Usuario de GitHub |
 |------------|-------------------|
 | **Matías Limina** | [@MatiasLimina](https://github.com/MatiasLimina) |
