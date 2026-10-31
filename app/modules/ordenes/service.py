@@ -42,6 +42,7 @@ from app.core.errores import (
     SinPermiso,
     restriccion_violada,
 )
+from app.core.paginacion import Pagina, Paginacion, armar_pagina, verificar_pagina
 from app.modules.ordenes.models import (
     CodigoEstado,
     HistorialEstadoOrden,
@@ -55,6 +56,7 @@ from app.modules.ordenes.schemas import (
     ItemOrdenSalida,
     OrdenAltaEntrada,
     OrdenDetalleSalida,
+    OrdenResumenSalida,
 )
 from app.modules.ordenes.unit_of_work import OrdenesUoW
 from app.modules.repuestos.service import MovimientoPedido, aplicar_movimientos_stock
@@ -427,3 +429,38 @@ async def avisar_orden_terminada(orden_id: int, patente: str) -> None:
     línea no lleva nombre, correo ni teléfono del cliente. Espera con `asyncio.sleep`: nunca una pausa que bloquee el bucle de eventos."""
     await asyncio.sleep(DEMORA_AVISO_SEGUNDOS)
     logger_avisos.info(MENSAJE_AVISO.format(orden_id=orden_id, patente=patente))
+
+
+# -- Lecturas (C-15) ---------------------------------------------------------------------------
+# Personal que ve cualquier orden (matriz: «el personal»); además ve el detalle el dueño (RN17).
+ROLES_DE_PERSONAL = frozenset({Rol.RECEPCION.value, Rol.ADMIN.value, Rol.MECANICO.value})
+MENSAJE_SIN_PERMISO_VER = "Sólo el personal del taller o el dueño del vehículo puede ver la orden"
+
+
+def armar_resumen(orden: OrdenTrabajo) -> OrdenResumenSalida:
+    """Elemento de un listado desde una orden con el vehículo y su cliente precargados
+    (`listar_resumen` o `listar_resumen_de_usuario`); no lee ítems ni historial."""
+    return OrdenResumenSalida(
+        id=orden.id,  # type: ignore[arg-type]
+        estado=orden.estado,
+        patente=orden.vehiculo.patente,
+        total=orden.total,
+        creada_en=orden.creada_en,
+        mecanico_id=orden.mecanico_id,
+        falla=orden.falla,
+        cliente=orden.vehiculo.cliente.nombre,
+    )
+
+
+async def listar_ordenes(
+    uow: OrdenesUoW, pag: Paginacion, estado: CodigoEstado | None
+) -> Pagina[OrdenResumenSalida]:
+    """Listado del personal (el rol lo exige el router), de la más nueva a la más vieja.
+    Contar primero evita traer filas de una página que da 422."""
+    filtro = estado.value if estado is not None else None
+    async with uow:
+        total = await uow.ordenes.contar_por_estado(filtro)
+        verificar_pagina(pag, total)
+        ordenes = await uow.ordenes.listar_resumen(filtro, offset=pag.offset, limit=pag.size)
+        items = [armar_resumen(o) for o in ordenes]
+    return armar_pagina(items, total, pag)
