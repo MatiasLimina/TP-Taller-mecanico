@@ -1,0 +1,106 @@
+Evidencia del caso PDF C-14 — disparador de sólo agregado y clave foránea de estado_orden
+Generada con psql -f test/solo_agregado.sql sobre la base migrada con alembic upgrade head
+
+BEGIN;
+BEGIN
+-- --- Datos propios del script (valores unicos; el catalogo convive con el seed) ---
+INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+    ('SA_ORIGEN',  'Estado de prueba origen',  9001, false),
+    ('SA_DESTINO', 'Estado de prueba destino', 9002, false)
+ON CONFLICT (codigo) DO NOTHING;
+INSERT 0 2
+INSERT INTO usuario (email, nombre, password_hash)
+VALUES ('solo-agregado@example.test', 'Prueba solo agregado', 'sin-hash-de-prueba')
+RETURNING id AS usuario_id \gset
+INSERT 0 1
+INSERT INTO cliente (usuario_id, nombre, documento, telefono)
+VALUES (:usuario_id, 'Cliente de prueba', 'SOLO-AGREGADO-DOC', '0000')
+RETURNING id AS cliente_id \gset
+INSERT 0 1
+INSERT INTO vehiculo (cliente_id, patente, marca, modelo, anio)
+VALUES (:cliente_id, 'SOLOAG1', 'Marca', 'Modelo', 2020)
+RETURNING id AS vehiculo_id \gset
+INSERT 0 1
+INSERT INTO orden_trabajo (vehiculo_id, estado, falla, total)
+VALUES (:vehiculo_id, 'SA_ORIGEN', 'Prueba de solo agregado', 0)
+RETURNING id AS orden_id \gset
+INSERT 0 1
+INSERT INTO repuesto (codigo, descripcion, precio, stock)
+VALUES ('SOLO-AGREGADO-REP', 'Repuesto de prueba', 100.00, 10)
+RETURNING id AS repuesto_id \gset
+INSERT 0 1
+-- INSERT esta permitido en las tres tablas de solo agregado:
+INSERT INTO historial_estado_orden (orden_id, desde_estado, hasta_estado, usuario_id)
+VALUES (:orden_id, NULL, 'SA_ORIGEN', :usuario_id)
+RETURNING id AS historial_estado_id \gset
+INSERT 0 1
+INSERT INTO movimiento_stock (repuesto_id, orden_id, usuario_id, cantidad, motivo)
+VALUES (:repuesto_id, :orden_id, :usuario_id, 5, 'ajuste de prueba')
+RETURNING id AS movimiento_id \gset
+INSERT 0 1
+INSERT INTO historial_precio_repuesto (repuesto_id, usuario_id, precio_anterior, precio_nuevo)
+VALUES (:repuesto_id, :usuario_id, 100.00, 120.00)
+RETURNING id AS historial_precio_id \gset
+INSERT 0 1
+-- --- 1. historial_estado_orden ---
+-- Esperado: ERROR P0001 -- "UPDATE rechazado: historial_estado_orden es de solo agregado"
+UPDATE historial_estado_orden SET hasta_estado = 'SA_DESTINO' WHERE id = :historial_estado_id;
+psql:test/solo_agregado.sql:66: ERROR:  P0001: UPDATE rechazado: historial_estado_orden es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- Esperado: ERROR P0001 -- "DELETE rechazado: historial_estado_orden es de solo agregado"
+DELETE FROM historial_estado_orden WHERE id = :historial_estado_id;
+psql:test/solo_agregado.sql:69: ERROR:  P0001: DELETE rechazado: historial_estado_orden es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- --- 2. movimiento_stock ---
+-- Esperado: ERROR P0001 -- "UPDATE rechazado: movimiento_stock es de solo agregado"
+UPDATE movimiento_stock SET cantidad = 99 WHERE id = :movimiento_id;
+psql:test/solo_agregado.sql:73: ERROR:  P0001: UPDATE rechazado: movimiento_stock es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- Esperado: ERROR P0001 -- "DELETE rechazado: movimiento_stock es de solo agregado"
+DELETE FROM movimiento_stock WHERE id = :movimiento_id;
+psql:test/solo_agregado.sql:76: ERROR:  P0001: DELETE rechazado: movimiento_stock es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- --- 3. historial_precio_repuesto ---
+-- Esperado: ERROR P0001 -- "UPDATE rechazado: historial_precio_repuesto es de solo agregado"
+UPDATE historial_precio_repuesto SET precio_nuevo = 130.00 WHERE id = :historial_precio_id;
+psql:test/solo_agregado.sql:80: ERROR:  P0001: UPDATE rechazado: historial_precio_repuesto es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- Esperado: ERROR P0001 -- "DELETE rechazado: historial_precio_repuesto es de solo agregado"
+DELETE FROM historial_precio_repuesto WHERE id = :historial_precio_id;
+psql:test/solo_agregado.sql:83: ERROR:  P0001: DELETE rechazado: historial_precio_repuesto es de solo agregado
+HINT:  Registrar una fila nueva en lugar de modificar o borrar una existente
+CONTEXT:  PL/pgSQL function rechazar_cambio_solo_agregado() line 3 at RAISE
+LOCATION:  exec_stmt_raise, pl_exec.c:3923
+-- --- 4. Clave foranea: orden con un estado que no esta en el catalogo ---
+-- Esperado: ERROR 23503 -- violacion de fk_orden_trabajo_estado_estado_orden
+INSERT INTO orden_trabajo (vehiculo_id, estado, falla, total)
+VALUES (:vehiculo_id, 'INEXISTENTE', 'Estado fuera del catalogo', 0);
+psql:test/solo_agregado.sql:88: ERROR:  23503: insert or update on table "orden_trabajo" violates foreign key constraint "fk_orden_trabajo_estado_estado_orden"
+DETAIL:  Key (estado)=(INEXISTENTE) is not present in table "estado_orden".
+SCHEMA NAME:  public
+TABLE NAME:  orden_trabajo
+CONSTRAINT NAME:  fk_orden_trabajo_estado_estado_orden
+LOCATION:  ri_ReportViolation, ri_triggers.c:2783
+-- Las tres filas siguen intactas despues de los rechazos (cada conteo debe ser 1):
+SELECT
+    (SELECT count(*) FROM historial_estado_orden    WHERE id = :historial_estado_id)  AS historial_estado_orden,
+    (SELECT count(*) FROM movimiento_stock          WHERE id = :movimiento_id)        AS movimiento_stock,
+    (SELECT count(*) FROM historial_precio_repuesto WHERE id = :historial_precio_id)  AS historial_precio_repuesto;
+ historial_estado_orden | movimiento_stock | historial_precio_repuesto
+------------------------+------------------+---------------------------
+                      1 |                1 |                         1
+(1 row)
+
+-- Ninguna fila de lo anterior queda en la base (las secuencias de identidad si avanzan):
+ROLLBACK;
+ROLLBACK

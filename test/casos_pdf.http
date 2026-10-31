@@ -1,0 +1,747 @@
+# =============================================================================
+# test/casos_pdf.http -- Recorrido integrador de cierre (C-16)
+#   Casos de prueba minimos de la consigna (C-01 a C-19, salvo C-14 que es SQL)
+#   y verificacion end-to-end de la matriz RBAC sobre el estado del seed.
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+#   (para ver las consultas SQL del caso C-15 en consola:
+#    $env:SQL_ECHO="true"; .venv\Scripts\python.exe -m uvicorn main:app --port 8000)
+#
+# ESTADO CONOCIDO: correr `.venv\Scripts\python.exe seed.py` inmediatamente antes
+# de ejecutar este archivo de arriba abajo. No requiere ningun paso en `psql`
+# entre peticiones. Para volver a correrlo, ejecutar otra vez `python seed.py`.
+#
+# Reutilizar una sesion: `Cookie: {{<name>.response.headers.Set-Cookie}}` (todas
+# las peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Estado inicial que deja `python seed.py`:
+#   Usuarios (1..6 con `ClaveSegura1`, 7 con `Provisoria1`):
+#     1 admin@example.com      (ADMIN)
+#     2 admin2@example.com     (ADMIN)
+#     3 recepcion@example.com  (RECEPCION)
+#     4 mecanico@example.com   (MECANICO)
+#     5 mecanico2@example.com  (MECANICO)
+#     6 cliente@example.com    (CLIENTE, ficha cliente id=1 Laura Martinez, doc 28111222)
+#     7 nuevo@example.com      (MECANICO, debe_cambiar_password=true)
+#   Fichas de cliente:
+#     1 Laura Martinez (usuario_id=6, doc 28111222) -> vehiculos 1 (AB123CD) y 2 (AC456EF)
+#     2 Jorge Perez    (usuario_id=null, doc 25111333) -> vehiculo 3 (AD789GH)
+#   Repuestos:
+#     1 FIL-ACE-01   ("8500.00",  stock 10, historial 8000.00 -> 8500.00)
+#     2 PAS-FRE-DEL  ("32000.00", stock 4)
+#     3 BUJ-01       ("4500.00",  stock 2)
+#     4 ACE-5W30-1L  ("12000.00", stock 20)
+#   Ordenes:
+#     1 vehiculo 1 (AB123CD, Laura), PENDIENTE, total "56500.00" (2 items: FIL-ACE-01 x1, ACE-5W30-1L x4)
+#     2 vehiculo 3 (AD789GH, Jorge), EN_REPARACION (mecanico 4), total "18000.00" (1 item: BUJ-01 x4, stock=2)
+#
+# Mapa de casos del PDF (pags. 20-21) en este archivo y en las suites por modulo:
+#   C-01 -> casos 8-9          (suites: test/lecturas_ordenes.http, test/repuestos.http)
+#   C-02 -> casos 10-14        (suite:  test/auth.http)
+#   C-03 -> casos 1, 15-17     (suite:  test/sesion.http)
+#   C-04 -> casos 18-19        (suite:  test/auth.http)
+#   C-05 -> casos 67-72        (suite:  test/auth.http)
+#   C-06 -> casos 20-25        (suites: test/sesion.http, test/lecturas_ordenes.http)
+#   C-07 -> casos 26-31        (suite:  test/personal.http)
+#   C-08 -> caso  32           (suite:  test/personal.http)
+#   C-09 -> casos 33-36        (suite:  test/sesion.http)
+#   C-10 -> casos 50-51        (suite:  test/ordenes.http)
+#   C-11 -> casos 52-54        (suite:  test/transiciones.http)
+#   C-12 -> casos 55-57        (suite:  test/transiciones.http)
+#   C-13 -> casos 58-60        (suite:  test/transiciones.http)
+#   C-14 -> SQL directo: `psql -f test/solo_agregado.sql` (salida en test/evidencia_c14.txt)
+#   C-15 -> casos 61-63        (suite:  test/lecturas_ordenes.http y test/evidencia_c15.txt)
+#   C-16 -> casos 37-42        (suite:  test/repuestos.http)
+#   C-17 -> casos 47-49        (suites: test/ordenes.http, test/lecturas_ordenes.http)
+#   C-18 -> casos 43-46        (suite:  test/stock.http)
+#   C-19 -> casos 64-66        (suite:  test/clientes.http)
+# =============================================================================
+
+@base = http://localhost:8000
+
+# =============================================================================
+# A. Logins de los 7 usuarios del seed (casos 1-7)
+# =============================================================================
+
+### 1. (PDF C-03 parte 1) Login de admin@example.com: devuelve Set-Cookie HttpOnly y cuerpo sin el JWT
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+#   y {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginAdmin
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 2. Login de admin2@example.com (segundo ADMIN del seed, usado en C-07)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginAdmin2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin2@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 3. Login de recepcion@example.com (RECEPCION)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 4. Login de mecanico@example.com (MECANICO asignado a la orden 2)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 5. Login de mecanico2@example.com (segundo MECANICO)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginMecanico2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico2@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 6. Login de cliente@example.com (Laura Martinez, duena de vehiculos 1 y 2 y de la orden 1)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name loginCliente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cliente@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 7. Login de nuevo@example.com (MECANICO con contrasena provisoria)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": true, "expira_en_segundos": 1800}
+# @name loginNuevo
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nuevo@example.com",
+  "password": "Provisoria1"
+}
+
+# =============================================================================
+# B. Casos PDF C-01 a C-04, C-06 y Matriz RBAC contra el seed (casos 8-25)
+# =============================================================================
+
+### 8. (PDF C-01) Parametro de ruta no entero en GET /ordenes/abc
+# Esperado: 422 con detail[0].type == "int_parsing" y loc == ["path", "orden_id"] (sin llegar al servicio)
+# @no-cookie-jar
+GET {{base}}/ordenes/abc
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 9. (PDF C-01) Parametro de ruta no entero en GET /repuestos/abc
+# Esperado: 422 con detail[0].type == "int_parsing" y loc == ["path", "repuesto_id"]
+# @no-cookie-jar
+GET {{base}}/repuestos/abc
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 10. (PDF C-02) Registro de cliente nuevo: crea usuario + rol CLIENTE + ficha en una sola transaccion
+# Esperado: 201 con {id: 8, email: "carlos@cierre.example.com", nombre: "Carlos Cierre",
+#   roles: ["CLIENTE"], cliente: {id: 3, nombre: "Carlos Cierre", documento: "49000001", telefono: "1149000001"}}
+# @name registroCarlos
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Carlos Cierre",
+  "documento": "49000001",
+  "telefono": "1149000001"
+}
+
+### 11. (PDF C-02) Registro con correo repetido y documento nuevo: 409 y no queda ficha huerfana para 49000002
+# Esperado: 409 {"detail": "El correo ya está registrado"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Intento Correo Repetido",
+  "documento": "49000002",
+  "telefono": "1149000002"
+}
+
+### 12. (PDF C-02) Registro con correo nuevo y documento repetido: 409 y no queda usuario huerfano
+# Esperado: 409 {"detail": "El documento ya pertenece a un cliente del taller"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "otro@cierre.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Intento Documento Repetido",
+  "documento": "49000001",
+  "telefono": "1149000003"
+}
+
+### 13. (PDF C-02 / RN02) Registro con el documento de una ficha presencial sin usuario (Jorge Perez, doc 25111333)
+# Esperado: 409 {"detail": "El documento ya pertenece a un cliente del taller"}
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jorge@cierre.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Jorge Web",
+  "documento": "25111333",
+  "telefono": "1144440002"
+}
+
+### 14. (PDF C-02) Login del cliente recien registrado (carlos@cierre.example.com)
+# Esperado: 200 con Set-Cookie HttpOnly
+# @name loginCarlos
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 15. (PDF C-03) Ruta protegida sin cookie: 401
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+
+### 16. (PDF C-03) Ruta protegida sin cookie y con encabezado Authorization: Bearer: se ignora y responde 401
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Authorization: Bearer token-en-encabezado-ignorado
+
+### 17. (PDF C-03) Ruta protegida con la cookie HttpOnly del login: 200
+# Esperado: 200 con {id: 1, email: "admin@example.com", roles_vigentes: ["ADMIN"], roles_token: ["ADMIN"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 18. (PDF C-04) Login con correo registrado y contrasena incorrecta: 401 con mensaje unico
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@example.com",
+  "password": "PasswordIncorrecta1"
+}
+
+### 19. (PDF C-04) Login con correo NO registrado: 401 con el mismo mensaje y verificacion contra hash ficticio
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "inexistente@cierre.example.com",
+  "password": "PasswordIncorrecta1"
+}
+
+### 20. (PDF C-06 / RBAC) Ruta del grupo protegido sin cookie: 401
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+
+### 21. (PDF C-06 / RN06) Ruta del grupo protegido con cambio de contrasena pendiente: 403
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+### 22. (PDF C-06 / RBAC) Ruta exclusiva de ADMIN llamada por RECEPCION: 403
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 23. (PDF C-06 / RBAC) POST /ordenes/1/iniciar llamado por ADMIN sin rol MECANICO: 403 (ADMIN no es comodin)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 24. (PDF C-06 / RN17) GET /ordenes/1 como cliente duena del vehiculo 1 (Laura): 200
+# Esperado: 200 con {id: 1, estado: "PENDIENTE", patente: "AB123CD", cliente: "Laura Martínez", total: "56500.00"}
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 25. (PDF C-06 / RN17) GET /ordenes/2 como cliente Laura sobre una orden ajena (de Jorge): 403
+# Esperado: 403 {"detail": "Sólo el personal del taller o el dueño del vehículo puede ver la orden"}
+# @no-cookie-jar
+GET {{base}}/ordenes/2
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Casos PDF C-07, C-08 y C-09: roles en vivo, autoproteccion y cambio obligatorio (casos 26-36)
+# =============================================================================
+
+### 26. (PDF C-07) Asignar un rol con vence_en en el pasado: 422
+# Esperado: 422 con error de validacion en ["body", "vence_en"]
+# @no-cookie-jar
+POST {{base}}/usuarios/2/roles
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "2020-01-01T00:00:00Z"
+}
+
+### 27. (PDF C-07) Asignar un rol con vence_en sin zona horaria: 422
+# Esperado: 422 con error de validacion en ["body", "vence_en"]
+# @no-cookie-jar
+POST {{base}}/usuarios/2/roles
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "rol": "RECEPCION",
+  "vence_en": "2030-01-01T00:00:00"
+}
+
+### 28. (PDF C-07) Revocar el rol ADMIN de admin2@example.com (queda admin@example.com como ADMIN vigente): 200
+# Esperado: 200 con {rol: "ADMIN", revocada_en: "<timestamp no nulo>"}
+# @no-cookie-jar
+DELETE {{base}}/usuarios/2/roles/ADMIN
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 29. (PDF C-07 / RN04) Con la misma cookie ya emitida de admin2, GET /eventos responde 403 de inmediato
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/eventos
+Cookie: {{loginAdmin2.response.headers.Set-Cookie}}
+
+### 30. (PDF C-07) GET /auth/yo con la cookie de admin2 muestra roles_vigentes vacio y roles_token con el del JWT
+# Esperado: 200 con {id: 2, email: "admin2@example.com", roles_vigentes: [], roles_token: ["ADMIN"]}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginAdmin2.response.headers.Set-Cookie}}
+
+### 31. (PDF C-07) GET /usuarios/2/roles conserva la fila revocada con su fecha en asignaciones
+# Esperado: 200 con {usuario_id: 2, roles_vigentes: [], asignaciones: [{rol: "ADMIN", revocada_en: "..."}]}
+# @no-cookie-jar
+GET {{base}}/usuarios/2/roles
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 32. (PDF C-08 / RN05) Un administrador intenta revocarse su propio rol ADMIN: 409
+# Esperado: 409 {"detail": "Un administrador no puede revocarse su propio rol ADMIN"}
+# @no-cookie-jar
+DELETE {{base}}/usuarios/1/roles/ADMIN
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 33. (PDF C-09) Login de nuevo@example.com antes de cambiar la contrasena (cookie previa)
+# Esperado: 200 con {"mensaje": "Sesión iniciada", "debe_cambiar_password": true, "expira_en_segundos": 1800}
+# @name loginNuevoAntes
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nuevo@example.com",
+  "password": "Provisoria1"
+}
+
+### 34. (PDF C-09) Cambio de contrasena enseguida del login: emite cookie nueva y limpia debe_cambiar_password
+# Esperado: 200 con Set-Cookie nueva y {"mensaje": "Contraseña actualizada", "debe_cambiar_password": false, "expira_en_segundos": 1800}
+# @name cambioNuevo
+# @no-cookie-jar
+POST {{base}}/auth/cambiar-password
+Cookie: {{loginNuevoAntes.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "password_actual": "Provisoria1",
+  "password_nueva": "NuevaSegura1"
+}
+
+### 35. (PDF C-09) La nueva cookie emitida por /auth/cambiar-password ya permite usar rutas protegidas
+# Esperado: 200 con {items: [...], total: 2, page: 1, size: 20, pages: 1}
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{cambioNuevo.response.headers.Set-Cookie}}
+
+### 36. (PDF C-09 / RN07) La cookie del login anterior queda invalidada de inmediato: 401
+# Esperado: 401 {"detail": "La sesión no es válida o venció"}
+# @no-cookie-jar
+GET {{base}}/auth/yo
+Cookie: {{loginNuevoAntes.response.headers.Set-Cookie}}
+
+# =============================================================================
+# D. Casos PDF C-16, C-18 y C-17: repuestos, historial de precios y estados (casos 37-49)
+# =============================================================================
+
+### 37. (PDF C-16) Busqueda de repuestos con comillas y SQL (' OR '1'='1): se trata como texto literal
+# Esperado: 200 con {items: [], total: 0, page: 1, size: 20, pages: 1}
+# @no-cookie-jar
+GET {{base}}/repuestos?q=%27%20OR%20%271%27%3D%271
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 38. (PDF C-16) Busqueda paginada con ?q=freno&size=1: devuelve PAS-FRE-DEL con total=1 y pages=1
+# Esperado: 200 con {items: [{id: 2, codigo: "PAS-FRE-DEL", stock: 4}], total: 1, page: 1, size: 1, pages: 1}
+# @no-cookie-jar
+GET {{base}}/repuestos?q=freno&size=1
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 39. (PDF C-16) Pagina fuera de rango (?q=freno&size=1&page=2): 422 indicando cuantas paginas hay
+# Esperado: 422 {"detail": "La página 2 no existe: hay 1"}
+# @no-cookie-jar
+GET {{base}}/repuestos?q=freno&size=1&page=2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 40. (PDF C-16) Tamano de pagina mayor al maximo permitido (?size=500): 422
+# Esperado: 422 con error de validacion en ["query", "size"]
+# @no-cookie-jar
+GET {{base}}/repuestos?size=500
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 41. (PDF C-16) PATCH /repuestos/2 enviando solo descripcion: cambia descripcion sin tocar precio ni stock
+# Esperado: 200 con {id: 2, codigo: "PAS-FRE-DEL", descripcion: "Pastillas de freno delanteras ventiladas", precio: "32000.00", stock: 4}
+# @no-cookie-jar
+PATCH {{base}}/repuestos/2
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "descripcion": "Pastillas de freno delanteras ventiladas"
+}
+
+### 42. (PDF C-16) PATCH /repuestos/2 enviando stock: 422 (el esquema de edicion no declara stock)
+# Esperado: 422 con detail[0].type == "extra_forbidden" y loc == ["body", "stock"]
+# @no-cookie-jar
+PATCH {{base}}/repuestos/2
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "stock": 99
+}
+
+### 43. (PDF C-18) PATCH /repuestos/2 cambiando el precio de 32000.00 a 35000.00: agrega linea al historial
+# Esperado: 200 con {id: 2, codigo: "PAS-FRE-DEL", precio: "35000.00", stock: 4}
+# @no-cookie-jar
+PATCH {{base}}/repuestos/2
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "precio": "35000.00"
+}
+
+### 44. (PDF C-18) PATCH /repuestos/2 cambiando solo la descripcion: NO agrega otra linea al historial de precios
+# Esperado: 200 con {id: 2, codigo: "PAS-FRE-DEL", descripcion: "Pastillas de freno delanteras", precio: "35000.00", stock: 4}
+# @no-cookie-jar
+PATCH {{base}}/repuestos/2
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "descripcion": "Pastillas de freno delanteras"
+}
+
+### 45. (PDF C-18) GET /repuestos/2/precios como ADMIN: devuelve una unica linea (32000.00 -> 35000.00)
+# Esperado: 200 con {items: [{repuesto_id: 2, usuario_id: 1, precio_anterior: "32000.00", precio_nuevo: "35000.00"}], total: 1, page: 1, size: 20, pages: 1}
+# @no-cookie-jar
+GET {{base}}/repuestos/2/precios
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 46. (PDF C-18) GET /repuestos/2/precios con un rol distinto de ADMIN (RECEPCION): 403
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/repuestos/2/precios
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 47. (PDF C-17) GET /estados-orden sin sesion: 401
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/estados-orden
+
+### 48. (PDF C-17) GET /estados-orden con cualquier rol autenticado (CLIENTE): 4 estados ordenados por posicion
+# Esperado: 200 con [{codigo: "PENDIENTE", posicion: 1, es_final: false}, {codigo: "EN_REPARACION", posicion: 2, es_final: false},
+#   {codigo: "TERMINADA", posicion: 3, es_final: true}, {codigo: "CANCELADA", posicion: 4, es_final: true}]
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 49. (PDF C-17) Filtrar GET /ordenes por un estado que no figura en el contrato (?estado=REABIERTA): 422
+# Esperado: 422 con detail[0].loc == ["query", "estado"] y type == "enum"
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=REABIERTA
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# E. Casos PDF C-10, C-11, C-12, C-13 y C-15: ordenes de trabajo (casos 50-63)
+# =============================================================================
+
+### 50. (PDF C-10) Crear orden con un repuesto inexistente (9999): 409 y no se crea la orden ni sus items
+# Esperado: 409 {"detail": "Repuestos inexistentes o dados de baja: 9999"}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "vehiculo_id": 1,
+  "falla": "Orden con repuesto inexistente",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1},
+    {"repuesto_id": 9999, "cantidad": 1}
+  ]
+}
+
+### 51. (PDF C-10) Crear orden con dos items validos: 201 en PENDIENTE con precios copiados, total e historial inicial
+# Esperado: 201 con {id: 3, estado: "PENDIENTE", patente: "AB123CD", total: "29000.00",
+#   items: [{repuesto_id: 1, cantidad: 2, precio_unitario: "8500.00", subtotal: "17000.00"},
+#           {repuesto_id: 4, cantidad: 1, precio_unitario: "12000.00", subtotal: "12000.00"}],
+#   historial: [{desde_estado: null, hasta_estado: "PENDIENTE", usuario_id: 3}]}
+# @no-cookie-jar
+POST {{base}}/ordenes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "vehiculo_id": 1,
+  "falla": "Cambio de filtro y aceite adicional",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 2},
+    {"repuesto_id": 4, "cantidad": 1}
+  ]
+}
+
+### 52. (PDF C-11) Terminar la orden #2 cuando BUJ-01 tiene stock 2 y pide 4: 409 y rollback completo
+# Esperado: 409 {"detail": "Stock insuficiente para el repuesto BUJ-01: hay 2 y se necesitan 4"}
+# @no-cookie-jar
+POST {{base}}/ordenes/2/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 53. (PDF C-11) Comprobar que el stock de BUJ-01 sigue en 2 tras el 409
+# Esperado: 200 con {id: 3, codigo: "BUJ-01", stock: 2}
+# @no-cookie-jar
+GET {{base}}/repuestos/3
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 54. (PDF C-11) Comprobar que la orden #2 sigue EN_REPARACION con sus 2 lineas de historial originales
+# Esperado: 200 con {id: 2, estado: "EN_REPARACION", historial: [null->PENDIENTE, PENDIENTE->EN_REPARACION]}
+# @no-cookie-jar
+GET {{base}}/ordenes/2
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 55. (PDF C-12) Reponer 2 unidades de BUJ-01 como ADMIN (stock pasa de 2 a 4)
+# Esperado: 200 con {id: 3, codigo: "BUJ-01", stock: 4}
+# @no-cookie-jar
+POST {{base}}/repuestos/3/reponer
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "cantidad": 2,
+  "motivo": "Reposición para orden #2"
+}
+
+### 56. (PDF C-12) Terminar la orden #2 con el mecanico asignado: 200 TERMINADA, descuenta stock y agenda aviso en segundo plano
+# Esperado: 200 con {id: 2, estado: "TERMINADA", total: "18000.00",
+#   historial: [null->PENDIENTE, PENDIENTE->EN_REPARACION, EN_REPARACION->TERMINADA]}
+#   (y tras ~0,5 s en consola: "Aviso simulado al cliente: la orden #2 del vehículo AD789GH está terminada")
+# @no-cookie-jar
+POST {{base}}/ordenes/2/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 57. (PDF C-12) Movimientos de BUJ-01 muestran stock inicial (+2), reposicion (+2) y descuento (-4 con orden_id=2)
+# Esperado: 200 con {items: [{cantidad: -4, orden_id: 2}, {cantidad: 2, orden_id: null}, {cantidad: 2, orden_id: null}], total: 3}
+# @no-cookie-jar
+GET {{base}}/repuestos/3/movimientos
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 58. (PDF C-13) Un cliente que no es dueno del vehiculo intenta cancelar la orden #3: 403
+# Esperado: 403 {"detail": "Sólo la recepción, un administrador o el dueño del vehículo puede cancelar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginCarlos.response.headers.Set-Cookie}}
+
+### 59. (PDF C-13) La cliente duena del vehiculo (Laura) cancela su orden #3 PENDIENTE: 200 CANCELADA sin tocar stock
+# Esperado: 200 con {id: 3, estado: "CANCELADA", historial: [null->PENDIENTE, PENDIENTE->CANCELADA]}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 60. (PDF C-13) Intentar cancelar la orden #2 que ya esta TERMINADA (estado final): 409
+# Esperado: 409 {"detail": "La orden 2 está TERMINADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/2/cancelar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 61. (PDF C-15) Crear orden #4 con 4 items sobre el vehiculo 1 para comparar consultas SQL con la orden #1 de 2 items
+# Esperado: 201 con {id: 4, estado: "PENDIENTE", patente: "AB123CD", total: "60000.00"} (8500 + 35000 + 4500 + 12000)
+# @no-cookie-jar
+POST {{base}}/ordenes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "vehiculo_id": 1,
+  "falla": "Revisión completa con cuatro repuestos",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1},
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 3, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 1}
+  ]
+}
+
+### 62. (PDF C-15) Detalle de la orden #1 (2 items): emite exactamente 5 sentencias SELECT en consola con SQL_ECHO=true
+# Esperado: 200 con {id: 1, items: [2 items], historial: [1 cambio], total: "56500.00"} (5 SELECT en SQL_ECHO)
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 63. (PDF C-15) Detalle de la orden #4 (4 items): emite exactamente las mismas 5 sentencias SELECT (sin N+1)
+# Esperado: 200 con {id: 4, items: [4 items], historial: [1 cambio], total: "60000.00"} (5 SELECT en SQL_ECHO)
+# @no-cookie-jar
+GET {{base}}/ordenes/4
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+# =============================================================================
+# F. Caso PDF C-19: baja logica de vehiculo sin ordenes y reutilizacion de patente (casos 64-66)
+# =============================================================================
+
+### 64. (PDF C-19) Dar de baja el vehiculo 2 (AC456EF, sin ordenes): 204 y marca borrado_en sin borrar la fila
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 65. (PDF C-19) Registrar otro vehiculo con la misma patente AC456EF para otro cliente (Jorge, id=2): 201
+# Esperado: 201 con {id: 4, cliente_id: 2, patente: "AC456EF", marca: "Volkswagen", modelo: "Gol Trend", anio: 2018}
+# @no-cookie-jar
+POST {{base}}/clientes/2/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "AC456EF",
+  "marca": "Volkswagen",
+  "modelo": "Gol Trend",
+  "anio": 2018
+}
+
+### 66. (PDF C-19) Intentar registrar un segundo vehiculo vigente con la misma patente AC456EF: 409
+# Esperado: 409 {"detail": "Ya hay un vehículo vigente con la patente AC456EF"}
+# @no-cookie-jar
+POST {{base}}/clientes/1/vehiculos
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+Content-Type: application/json
+
+{
+  "patente": "AC456EF",
+  "marca": "Renault",
+  "modelo": "Clio",
+  "anio": 2016
+}
+
+# =============================================================================
+# G. Caso PDF C-05: limite de intentos de login — 6 fallos seguidos -> 429 con Retry-After (casos 67-72)
+#    Se corre al final y sobre carlos@cierre.example.com para no bloquear a los usuarios del seed.
+# =============================================================================
+
+### 67. (PDF C-05) 1.er intento fallido de login para carlos@cierre.example.com: 401
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}
+
+### 68. (PDF C-05) 2.do intento fallido de login para carlos@cierre.example.com: 401
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}
+
+### 69. (PDF C-05) 3.er intento fallido de login para carlos@cierre.example.com: 401
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}
+
+### 70. (PDF C-05) 4.to intento fallido de login para carlos@cierre.example.com: 401
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}
+
+### 71. (PDF C-05) 5.to intento fallido de login para carlos@cierre.example.com: 401
+# Esperado: 401 {"detail": "Correo o contraseña incorrectos"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}
+
+### 72. (PDF C-05) 6.to intento fallido dentro del minuto: 429 con encabezado Retry-After (sin ejecutar bcrypt)
+# Esperado: 429 con encabezado Retry-After y {"detail": "Demasiados intentos fallidos. Espere antes de volver a intentar"}
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "carlos@cierre.example.com",
+  "password": "ClaveMala1"
+}

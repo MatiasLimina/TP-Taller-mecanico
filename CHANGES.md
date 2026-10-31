@@ -79,7 +79,7 @@ GATE 6: C-13 ✓ (y C-12 ✓)
   → C-15 ordenes-lecturas-sin-n-plus-1  [hecho]
 
 GATE 7: C-06, C-09, C-14, C-15 ✓
-  → C-16 verificacion-http-readme
+  → C-16 verificacion-http-readme       [hecho]
 ```
 
 ### Camino crítico (9 changes — mínimo irreducible)
@@ -378,7 +378,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 ## FASE 6 — Verificación y entregables (Ej.1-Ej.8, cierre)
 
 ### [C-16] `verificacion-http-readme`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - Archivos `.http` en `test/` para los casos PDF C01…C19, con respuesta esperada en comentario; evidencia de C14 (`solo_agregado.sql`) y C15 (consultas fijas)
   - Verificación end-to-end de la matriz RBAC (401 vs 403, 404, 409, 422, 429) contra el seed
@@ -408,4 +408,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-31)**: C-01…C-15 completados; próximo: propose de C-16.
+**Estado (2026-10-31)**: C-01…C-16 completados (todos los changes del proyecto finalizados).
