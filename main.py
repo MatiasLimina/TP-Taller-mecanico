@@ -16,7 +16,11 @@ from app.modules.clientes.router import (
     router_vehiculos,
 )
 from app.modules.health.router import router as health_router
-from app.modules.ordenes.router import router_estados, router_ordenes
+from app.modules.ordenes.router import (
+    router_estados,
+    router_mis_ordenes,
+    router_ordenes,
+)
 from app.modules.repuestos.router import router_admin_repuestos, router_catalogo
 from app.modules.usuarios.router import router as auth_router
 from app.modules.usuarios.router import router_eventos, router_personal
@@ -51,7 +55,7 @@ rutas_abiertas.include_router(auth_router)
 # que se agregue después no queda montado. C-09: personal, roles de un usuario y eventos
 # (sólo ADMIN); C-11: catálogo de repuestos (lectura: ADMIN, RECEPCION y MECANICO; escritura: sólo
 # ADMIN); C-10: clientes, vehículos y mis-vehículos; C-13: catálogo de estados de las órdenes y
-# alta de órdenes; los siguientes suman los suyos.
+# alta de órdenes; C-15: lecturas de órdenes y mis-órdenes; los siguientes suman los suyos.
 rutas_protegidas = APIRouter(dependencies=[Depends(exigir_password_al_dia)])
 rutas_protegidas.include_router(router_personal)
 rutas_protegidas.include_router(router_eventos)
@@ -62,6 +66,7 @@ rutas_protegidas.include_router(router_vehiculos)
 rutas_protegidas.include_router(router_mis_vehiculos)
 rutas_protegidas.include_router(router_ordenes)
 rutas_protegidas.include_router(router_estados)
+rutas_protegidas.include_router(router_mis_ordenes)
 
 app.include_router(rutas_abiertas)
 app.include_router(rutas_protegidas)

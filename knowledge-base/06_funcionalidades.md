@@ -61,7 +61,7 @@ Organizadas por épica. Los criterios derivan de los ejercicios y casos de prueb
 - [x] Iniciar (mecánico queda asignado); terminar descuenta stock + movimientos + historial atómicamente; falta de stock → 409 sin cambios; aviso por `BackgroundTasks` sólo si hubo commit
 - [x] Cancelar: dueño / recepción / admin; 403 antes que 409; ajena → 403; terminada → 409
 ### US-052 — Lecturas (RN17) — C-15, C-17
-- [ ] `GET /ordenes?estado`, `GET /ordenes/{id}` (vehículo, cliente, ítems, repuesto, historial) con **número fijo de consultas** (2 vs 4 ítems → mismas consultas); `GET /estados-orden`; `GET /mis-ordenes`; estado inválido en filtro → 422
+- [x] `GET /ordenes?estado`, `GET /ordenes/{id}` (vehículo, cliente, ítems, repuesto, historial) con **número fijo de consultas** (2 vs 4 ítems → mismas consultas); `GET /estados-orden`; `GET /mis-ordenes`; estado inválido en filtro → 422. `GET /estados-orden` lo implementó C-13; los listados devuelven un resumen por orden (sin ítems ni historial) en orden de id descendente (C-15).
 
 ## Épica 7: Integridad en base (Ej.7) — C-14
 ### US-060 — Sólo agregado

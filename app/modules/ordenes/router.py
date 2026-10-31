@@ -27,19 +27,24 @@ no es entero o está fuera de 1..INT4). Orden de los rechazos:
   (mecánico asignado, dueño), que sólo se conoce después de leerla. Lo decide el servicio, con los
   roles vigentes de la base: 401 -> 403 (cambio pendiente) -> 422 -> 404 -> 403 (sin relación) ->
   409. Primero 404 y después 403 (S-07): el PDF pide 403 para «una orden ajena».
+
+Lecturas (C-15): `GET /ordenes` exige RECEPCION, ADMIN o MECANICO vigentes con `lectura_ordenes` en `dependencies=` de la ruta (el handler no usa al actor): 401 -> 403 (cambio pendiente) -> 403 (rol) -> 422 (`estado`, `page`, `size`). `GET /ordenes/{orden_id}` no lleva `requiere_rol`: personal o dueño del vehículo lo decide el servicio, 401 -> 403 (cambio pendiente) -> 422 -> 404 -> 403. `GET /mis-ordenes` (`router_mis_ordenes`, montado en `main.py`) sólo pide sesión y filtra siempre por el usuario de la sesión (RN17).
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends
+from fastapi import APIRouter, BackgroundTasks, Depends, Query
 
 from app.core.dependencies import UsuarioActualDep, requiere_rol
+from app.core.paginacion import Pagina, PaginacionDep
 from app.core.schemas import IdRuta
 from app.modules.ordenes import service
+from app.modules.ordenes.models import CodigoEstado
 from app.modules.ordenes.schemas import (
     EstadoOrdenSalida,
     OrdenAltaEntrada,
     OrdenDetalleSalida,
+    OrdenResumenSalida,
 )
 from app.modules.ordenes.unit_of_work import OrdenesUoWDep
 from app.modules.usuarios.models import Rol
@@ -89,3 +94,30 @@ async def terminar(
     # (403/404/409), esta línea no se ejecuta. Se llama por el módulo, no por import directo.
     tareas.add_task(service.avisar_orden_terminada, salida.id, salida.patente)
     return salida
+
+
+lectura_ordenes = requiere_rol(Rol.RECEPCION, Rol.ADMIN, Rol.MECANICO)  # UNA función (C-15)
+FiltroEstado = Annotated[CodigoEstado | None, Query()]
+
+router_mis_ordenes = APIRouter(prefix="/mis-ordenes", tags=["ordenes"])
+
+
+@router_ordenes.get("", dependencies=[Depends(lectura_ordenes)])
+async def listar_ordenes(
+    pag: PaginacionDep, uow: OrdenesUoWDep, estado: FiltroEstado = None
+) -> Pagina[OrdenResumenSalida]:
+    return await service.listar_ordenes(uow, pag, estado)
+
+
+@router_ordenes.get("/{orden_id}")
+async def detalle_orden(
+    orden_id: IdRuta, actual: UsuarioActualDep, uow: OrdenesUoWDep
+) -> OrdenDetalleSalida:
+    return await service.detalle_orden(uow, orden_id, actual.id)
+
+
+@router_mis_ordenes.get("")
+async def mis_ordenes(
+    pag: PaginacionDep, actual: UsuarioActualDep, uow: OrdenesUoWDep
+) -> Pagina[OrdenResumenSalida]:
+    return await service.mis_ordenes(uow, pag, actual.id)

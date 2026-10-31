@@ -62,6 +62,8 @@ Toda ruta del grupo protegido responde además **401** sin sesión y **403** con
 
 **Transiciones (`iniciar`, `terminar`, `cancelar`)**: un `IdRuta` inválido responde 422. «Mecánico asignado» exige que el rol MECANICO siga vigente (C-14 S-04).
 
+**Detalle `GET /ordenes/{id}`**: un id inválido responde 422; con id válido, 404 se evalúa antes que 403. «El personal» incluye cualquier MECANICO con el rol vigente (C-15 S-06, S-07).
+
 ## Rutas públicas / abiertas
 - `GET /health/live`, `GET /health/ready`
 - `POST /auth/registro`, `POST /auth/login`

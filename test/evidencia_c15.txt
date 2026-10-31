@@ -1,0 +1,54 @@
+Evidencia del caso PDF C-15 — detalle de una orden con 2 ítems y con 4 ítems
+Generada por verificar_c15.py con SQL_ECHO=true el 2026-10-31T04:08:49+00:00 sobre la base recién cargada con `python seed.py`; son las mismas líneas que muestra la consola de uvicorn con SQL_ECHO=true
+
+=== GET /ordenes/1 (orden con 2 ítems): 5 sentencias SQL ===
+2026-10-31 01:08:49,295 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-10-31 01:08:49,295 INFO sqlalchemy.engine.Engine SELECT usuario.id, usuario.email, usuario.nombre, usuario.password_hash, usuario.activo, usuario.debe_cambiar_password, usuario.password_cambiada_en
+FROM usuario
+WHERE usuario.id = $1::INTEGER
+2026-10-31 01:08:49,295 INFO sqlalchemy.engine.Engine [cached since 0.128s ago] (3,)
+2026-10-31 01:08:49,297 INFO sqlalchemy.engine.Engine COMMIT
+2026-10-31 01:08:49,299 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-10-31 01:08:49,299 INFO sqlalchemy.engine.Engine SELECT orden_trabajo.id, orden_trabajo.vehiculo_id, orden_trabajo.mecanico_id, orden_trabajo.estado, orden_trabajo.falla, orden_trabajo.creada_en, orden_trabajo.total, cliente_1.id AS id_1, cliente_1.usuario_id, cliente_1.nombre, cliente_1.documento, cliente_1.telefono, vehiculo_1.id AS id_2, vehiculo_1.cliente_id, vehiculo_1.patente, vehiculo_1.marca, vehiculo_1.modelo, vehiculo_1.anio, vehiculo_1.borrado_en
+FROM orden_trabajo LEFT OUTER JOIN vehiculo AS vehiculo_1 ON vehiculo_1.id = orden_trabajo.vehiculo_id LEFT OUTER JOIN cliente AS cliente_1 ON cliente_1.id = vehiculo_1.cliente_id
+WHERE orden_trabajo.id = $1::INTEGER
+2026-10-31 01:08:49,299 INFO sqlalchemy.engine.Engine [cached since 0.03529s ago] (1,)
+2026-10-31 01:08:49,301 INFO sqlalchemy.engine.Engine SELECT historial_estado_orden.orden_id AS historial_estado_orden_orden_id, historial_estado_orden.id AS historial_estado_orden_id, historial_estado_orden.desde_estado AS historial_estado_orden_desde_estado, historial_estado_orden.hasta_estado AS historial_estado_orden_hasta_estado, historial_estado_orden.usuario_id AS historial_estado_orden_usuario_id, historial_estado_orden.cuando AS historial_estado_orden_cuando
+FROM historial_estado_orden
+WHERE historial_estado_orden.orden_id IN ($1::INTEGER) ORDER BY historial_estado_orden.id
+2026-10-31 01:08:49,301 INFO sqlalchemy.engine.Engine [cached since 0.03307s ago] (1,)
+2026-10-31 01:08:49,303 INFO sqlalchemy.engine.Engine SELECT item_orden.orden_id AS item_orden_orden_id, item_orden.id AS item_orden_id, item_orden.repuesto_id AS item_orden_repuesto_id, item_orden.cantidad AS item_orden_cantidad, item_orden.precio_unitario AS item_orden_precio_unitario, repuesto_1.id AS repuesto_1_id, repuesto_1.codigo AS repuesto_1_codigo, repuesto_1.descripcion AS repuesto_1_descripcion, repuesto_1.precio AS repuesto_1_precio, repuesto_1.stock AS repuesto_1_stock, repuesto_1.borrado_en AS repuesto_1_borrado_en
+FROM item_orden LEFT OUTER JOIN repuesto AS repuesto_1 ON repuesto_1.id = item_orden.repuesto_id
+WHERE item_orden.orden_id IN ($1::INTEGER) ORDER BY item_orden.id
+2026-10-31 01:08:49,303 INFO sqlalchemy.engine.Engine [cached since 0.01913s ago] (1,)
+2026-10-31 01:08:49,304 INFO sqlalchemy.engine.Engine SELECT asignacion_rol.rol
+FROM asignacion_rol
+WHERE asignacion_rol.usuario_id = $1::INTEGER AND asignacion_rol.revocada_en IS NULL AND (asignacion_rol.vence_en IS NULL OR asignacion_rol.vence_en > $2::TIMESTAMP WITH TIME ZONE) ORDER BY asignacion_rol.rol
+2026-10-31 01:08:49,304 INFO sqlalchemy.engine.Engine [cached since 0.3963s ago] (3, datetime.datetime(2026, 10, 31, 4, 8, 49, 304218, tzinfo=datetime.timezone.utc))
+2026-10-31 01:08:49,305 INFO sqlalchemy.engine.Engine COMMIT
+
+=== GET /ordenes/3 (orden con 4 ítems): 5 sentencias SQL ===
+2026-10-31 01:08:49,310 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-10-31 01:08:49,310 INFO sqlalchemy.engine.Engine SELECT usuario.id, usuario.email, usuario.nombre, usuario.password_hash, usuario.activo, usuario.debe_cambiar_password, usuario.password_cambiada_en
+FROM usuario
+WHERE usuario.id = $1::INTEGER
+2026-10-31 01:08:49,311 INFO sqlalchemy.engine.Engine [cached since 0.1432s ago] (3,)
+2026-10-31 01:08:49,311 INFO sqlalchemy.engine.Engine COMMIT
+2026-10-31 01:08:49,313 INFO sqlalchemy.engine.Engine BEGIN (implicit)
+2026-10-31 01:08:49,313 INFO sqlalchemy.engine.Engine SELECT orden_trabajo.id, orden_trabajo.vehiculo_id, orden_trabajo.mecanico_id, orden_trabajo.estado, orden_trabajo.falla, orden_trabajo.creada_en, orden_trabajo.total, cliente_1.id AS id_1, cliente_1.usuario_id, cliente_1.nombre, cliente_1.documento, cliente_1.telefono, vehiculo_1.id AS id_2, vehiculo_1.cliente_id, vehiculo_1.patente, vehiculo_1.marca, vehiculo_1.modelo, vehiculo_1.anio, vehiculo_1.borrado_en
+FROM orden_trabajo LEFT OUTER JOIN vehiculo AS vehiculo_1 ON vehiculo_1.id = orden_trabajo.vehiculo_id LEFT OUTER JOIN cliente AS cliente_1 ON cliente_1.id = vehiculo_1.cliente_id
+WHERE orden_trabajo.id = $1::INTEGER
+2026-10-31 01:08:49,313 INFO sqlalchemy.engine.Engine [cached since 0.04962s ago] (3,)
+2026-10-31 01:08:49,315 INFO sqlalchemy.engine.Engine SELECT historial_estado_orden.orden_id AS historial_estado_orden_orden_id, historial_estado_orden.id AS historial_estado_orden_id, historial_estado_orden.desde_estado AS historial_estado_orden_desde_estado, historial_estado_orden.hasta_estado AS historial_estado_orden_hasta_estado, historial_estado_orden.usuario_id AS historial_estado_orden_usuario_id, historial_estado_orden.cuando AS historial_estado_orden_cuando
+FROM historial_estado_orden
+WHERE historial_estado_orden.orden_id IN ($1::INTEGER) ORDER BY historial_estado_orden.id
+2026-10-31 01:08:49,315 INFO sqlalchemy.engine.Engine [cached since 0.04723s ago] (3,)
+2026-10-31 01:08:49,317 INFO sqlalchemy.engine.Engine SELECT item_orden.orden_id AS item_orden_orden_id, item_orden.id AS item_orden_id, item_orden.repuesto_id AS item_orden_repuesto_id, item_orden.cantidad AS item_orden_cantidad, item_orden.precio_unitario AS item_orden_precio_unitario, repuesto_1.id AS repuesto_1_id, repuesto_1.codigo AS repuesto_1_codigo, repuesto_1.descripcion AS repuesto_1_descripcion, repuesto_1.precio AS repuesto_1_precio, repuesto_1.stock AS repuesto_1_stock, repuesto_1.borrado_en AS repuesto_1_borrado_en
+FROM item_orden LEFT OUTER JOIN repuesto AS repuesto_1 ON repuesto_1.id = item_orden.repuesto_id
+WHERE item_orden.orden_id IN ($1::INTEGER) ORDER BY item_orden.id
+2026-10-31 01:08:49,317 INFO sqlalchemy.engine.Engine [cached since 0.03306s ago] (3,)
+2026-10-31 01:08:49,318 INFO sqlalchemy.engine.Engine SELECT asignacion_rol.rol
+FROM asignacion_rol
+WHERE asignacion_rol.usuario_id = $1::INTEGER AND asignacion_rol.revocada_en IS NULL AND (asignacion_rol.vence_en IS NULL OR asignacion_rol.vence_en > $2::TIMESTAMP WITH TIME ZONE) ORDER BY asignacion_rol.rol
+2026-10-31 01:08:49,318 INFO sqlalchemy.engine.Engine [cached since 0.4101s ago] (3, datetime.datetime(2026, 10, 31, 4, 8, 49, 318125, tzinfo=datetime.timezone.utc))
+2026-10-31 01:08:49,319 INFO sqlalchemy.engine.Engine COMMIT

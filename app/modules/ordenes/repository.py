@@ -15,13 +15,16 @@ bloquea un vehículo ni lee un repuesto con bloqueo antes de la orden.
 `historial_estado_orden` es de sólo agregado (RN15, C-04): su repositorio solo se usa con `add()`;
 nunca `update` ni `delete`. El catálogo `estado_orden` es de sólo lectura (RN19): lo carga el seed
 (C-06) y la API no lo escribe.
+
+Lecturas (C-15): `listar_resumen` y `listar_resumen_de_usuario` traen la página con el vehículo y su cliente en UNA sentencia (muchos-a-uno), en orden de id descendente, y `contar_por_estado`/`contar_de_usuario` cuentan con el mismo filtro (`_contar`). Ninguna lectura bloquea filas. El detalle reutiliza `get_detalle`.
 """
 
 from collections.abc import Sequence
 
-from sqlalchemy.orm import joinedload, selectinload
+from sqlalchemy.orm import contains_eager, joinedload, selectinload
 from sqlmodel import col, select
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel.sql.expression import SelectOfScalar
 
 from app.core.repository import BaseRepository
 from app.modules.clientes.models import Cliente, Vehiculo
@@ -108,6 +111,63 @@ class OrdenTrabajoRepository(BaseRepository[OrdenTrabajo]):
             .where(col(OrdenTrabajo.id) == orden_id)
         )
         return (await self.session.exec(consulta)).first()
+
+    # -- Lecturas (C-15): sin bloqueo, la página en UNA consulta con vehículo y cliente --
+
+    def _filtrada_por_estado(self, estado: str | None) -> SelectOfScalar[OrdenTrabajo]:
+        """Todas las órdenes, o sólo las de `estado` (usa `ix_orden_trabajo_estado`)."""
+        consulta = self._consulta_base()
+        if estado is not None:
+            consulta = consulta.where(col(OrdenTrabajo.estado) == estado)
+        return consulta
+
+    async def contar_por_estado(self, estado: str | None) -> int:
+        """`total` del listado del personal, con el mismo filtro que la página."""
+        return await self._contar(self._filtrada_por_estado(estado))
+
+    async def listar_resumen(
+        self, estado: str | None, *, offset: int, limit: int
+    ) -> list[OrdenTrabajo]:
+        """Página de órdenes de la más nueva a la más vieja (id descendente, por la PK).
+
+        UNA sentencia para cualquier tamaño de página: el vehículo y su cliente llegan por JOIN
+        (`joinedload`, relaciones muchos-a-uno), aunque el vehículo esté dado de baja (RN16).
+        """
+        consulta = (
+            self._filtrada_por_estado(estado)
+            .options(joinedload(OrdenTrabajo.vehiculo).joinedload(Vehiculo.cliente))
+            .order_by(col(OrdenTrabajo.id).desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list((await self.session.exec(consulta)).unique().all())
+
+    def _de_usuario(self, usuario_id: int) -> SelectOfScalar[OrdenTrabajo]:
+        """Órdenes de los vehículos de la ficha del usuario, también los dados de baja (RN17)."""
+        return (
+            self._consulta_base()
+            .join(Vehiculo, col(Vehiculo.id) == col(OrdenTrabajo.vehiculo_id))
+            .join(Cliente, col(Cliente.id) == col(Vehiculo.cliente_id))
+            .where(col(Cliente.usuario_id) == usuario_id)
+        )
+
+    async def contar_de_usuario(self, usuario_id: int) -> int:
+        """`total` de `/mis-ordenes`, con el mismo filtro que la página."""
+        return await self._contar(self._de_usuario(usuario_id))
+
+    async def listar_resumen_de_usuario(
+        self, usuario_id: int, *, offset: int, limit: int
+    ) -> list[OrdenTrabajo]:
+        """Página de `/mis-ordenes` en UNA sentencia: `contains_eager` llena vehículo y cliente
+        con los mismos JOIN del filtro (sin un segundo JOIN con alias)."""
+        consulta = (
+            self._de_usuario(usuario_id)
+            .options(contains_eager(OrdenTrabajo.vehiculo).contains_eager(Vehiculo.cliente))
+            .order_by(col(OrdenTrabajo.id).desc())
+            .offset(offset)
+            .limit(limit)
+        )
+        return list((await self.session.exec(consulta)).unique().all())
 
 
 class ItemOrdenRepository(BaseRepository[ItemOrden]):

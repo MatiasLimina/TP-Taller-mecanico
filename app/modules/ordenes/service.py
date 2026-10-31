@@ -42,6 +42,7 @@ from app.core.errores import (
     SinPermiso,
     restriccion_violada,
 )
+from app.core.paginacion import Pagina, Paginacion, armar_pagina, verificar_pagina
 from app.modules.ordenes.models import (
     CodigoEstado,
     HistorialEstadoOrden,
@@ -55,6 +56,7 @@ from app.modules.ordenes.schemas import (
     ItemOrdenSalida,
     OrdenAltaEntrada,
     OrdenDetalleSalida,
+    OrdenResumenSalida,
 )
 from app.modules.ordenes.unit_of_work import OrdenesUoW
 from app.modules.repuestos.service import MovimientoPedido, aplicar_movimientos_stock
@@ -427,3 +429,73 @@ async def avisar_orden_terminada(orden_id: int, patente: str) -> None:
     línea no lleva nombre, correo ni teléfono del cliente. Espera con `asyncio.sleep`: nunca una pausa que bloquee el bucle de eventos."""
     await asyncio.sleep(DEMORA_AVISO_SEGUNDOS)
     logger_avisos.info(MENSAJE_AVISO.format(orden_id=orden_id, patente=patente))
+
+
+# -- Lecturas (C-15) ---------------------------------------------------------------------------
+# Personal que ve cualquier orden (matriz: «el personal»); además ve el detalle el dueño (RN17).
+ROLES_DE_PERSONAL = frozenset({Rol.RECEPCION.value, Rol.ADMIN.value, Rol.MECANICO.value})
+MENSAJE_SIN_PERMISO_VER = "Sólo el personal del taller o el dueño del vehículo puede ver la orden"
+
+
+def armar_resumen(orden: OrdenTrabajo) -> OrdenResumenSalida:
+    """Elemento de un listado desde una orden con el vehículo y su cliente precargados
+    (`listar_resumen` o `listar_resumen_de_usuario`); no lee ítems ni historial."""
+    return OrdenResumenSalida(
+        id=orden.id,  # type: ignore[arg-type]
+        estado=orden.estado,
+        patente=orden.vehiculo.patente,
+        total=orden.total,
+        creada_en=orden.creada_en,
+        mecanico_id=orden.mecanico_id,
+        falla=orden.falla,
+        cliente=orden.vehiculo.cliente.nombre,
+    )
+
+
+async def listar_ordenes(
+    uow: OrdenesUoW, pag: Paginacion, estado: CodigoEstado | None
+) -> Pagina[OrdenResumenSalida]:
+    """Listado del personal (el rol lo exige el router), de la más nueva a la más vieja.
+    Contar primero evita traer filas de una página que da 422."""
+    filtro = estado.value if estado is not None else None
+    async with uow:
+        total = await uow.ordenes.contar_por_estado(filtro)
+        verificar_pagina(pag, total)
+        ordenes = await uow.ordenes.listar_resumen(filtro, offset=pag.offset, limit=pag.size)
+        items = [armar_resumen(o) for o in ordenes]
+    return armar_pagina(items, total, pag)
+
+
+async def detalle_orden(uow: OrdenesUoW, orden_id: int, usuario_id: int) -> OrdenDetalleSalida:
+    """Detalle para el personal o el dueño del vehículo: 404 antes que 403 (C-14 S-07).
+
+    Reutiliza `get_detalle` (3 SELECT fijos) y `armar_detalle` de C-13. Los roles se leen en la
+    base en el mismo bloque (RN04), siempre: 5 sentencias por petición con cualquier cantidad
+    de ítems. El dueño es el usuario de la ficha del cliente del vehículo, ya precargada,
+    también si el vehículo está dado de baja (C-14 S-08). Sólo lectura: sin bloqueos.
+    """
+    async with uow:
+        orden = await uow.ordenes.get_detalle(orden_id)
+        if orden is None:
+            raise NoEncontrado(MENSAJE_ORDEN_INEXISTENTE)  # 404 antes que el permiso
+        roles = await _roles_vigentes(uow, usuario_id)
+        es_personal = not roles.isdisjoint(ROLES_DE_PERSONAL)
+        if not es_personal and orden.vehiculo.cliente.usuario_id != usuario_id:
+            raise SinPermiso(MENSAJE_SIN_PERMISO_VER)
+        salida = armar_detalle(orden)  # dentro del bloque, con todo precargado
+    return salida
+
+
+async def mis_ordenes(
+    uow: OrdenesUoW, pag: Paginacion, usuario_id: int
+) -> Pagina[OrdenResumenSalida]:
+    """Órdenes de los vehículos propios (RN17); el filtro es SIEMPRE el usuario de la sesión.
+    Sin ficha o sin vehículos: página vacía."""
+    async with uow:
+        total = await uow.ordenes.contar_de_usuario(usuario_id)
+        verificar_pagina(pag, total)
+        ordenes = await uow.ordenes.listar_resumen_de_usuario(
+            usuario_id, offset=pag.offset, limit=pag.size
+        )
+        items = [armar_resumen(o) for o in ordenes]
+    return armar_pagina(items, total, pag)
