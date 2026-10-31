@@ -1,0 +1,631 @@
+# =============================================================================
+# test/lecturas_ordenes.http -- Casos de C-15 ordenes-lecturas-sin-n-plus-1
+#   (GET /ordenes, GET /ordenes/{id}, GET /mis-ordenes -- las lecturas de ordenes de trabajo:
+#    listado del personal con filtro por estado, detalle para el personal o el dueño del
+#    vehiculo y ordenes propias del usuario autenticado; casos del PDF C-15 -detalle con 2 y con
+#    4 items con las mismas sentencias SQL- y C-17 -catalogo de estados y filtro por un estado que
+#    el contrato no declara-)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+#   Para ver las consultas SQL de cada peticion en la consola de uvicorn (SQL_ECHO), levantarlo asi:
+#   $env:SQL_ECHO="true"; .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en los casos que lo piden).
+#
+# ESTADO CONOCIDO: `.venv\Scripts\python.exe seed.py` inmediatamente antes. Para repetir el
+# archivo, volver a correr el seed (el archivo crea la orden 3, la cancela y da de baja el
+# vehiculo 2; el seed vacia las 13 tablas con RESTART IDENTITY y recarga todo).
+#
+# Ids del seed (C-06), deterministas por RESTART IDENTITY:
+#   Usuarios: 1 admin@example.com (ADMIN), 2 admin2@example.com (ADMIN), 3 recepcion@example.com
+#     (RECEPCION), 4 mecanico@example.com (MECANICO), 5 mecanico2@example.com (MECANICO),
+#     6 cliente@example.com (CLIENTE, ficha "Laura Martínez"), 7 nuevo@example.com (MECANICO, con
+#     cambio de contraseña pendiente).
+#   Fichas de cliente: 1 Laura Martínez (usuario 6), 2 Jorge Pérez (sin usuario).
+#   Vehiculos: 1 AB123CD y 2 AC456EF (Laura), 3 AD789GH (Jorge).
+#   Repuestos: 1 FIL-ACE-01 (8500), 2 PAS-FRE-DEL (32000), 3 BUJ-01 (4500), 4 ACE-5W30-1L (12000).
+#   Ordenes: 1 (vehiculo 1, PENDIENTE, items FIL-ACE-01 x 1 y ACE-5W30-1L x 4, total 56500.00,
+#     historial null -> PENDIENTE por 3); 2 (vehiculo 3, EN_REPARACION, mecanico 4, BUJ-01 x 4,
+#     total 18000.00, historial null -> PENDIENTE por 3 y PENDIENTE -> EN_REPARACION por 4).
+#   Contraseñas: ClaveSegura1 (y Provisoria1 para nuevo@example.com).
+#
+# Lo que agrega el archivo con la API: el usuario 8 ajeno@lecturas.example.com (documento
+# 48000001, ficha 3 sin vehiculos) y la orden 3 de CUATRO items (vehiculo 2, repuestos 1 a 4 x 1,
+# total 57000.00) para el caso PDF C-15. Al final, la duena cancela la orden 3 y la recepcion da de
+# baja el vehiculo 2 (S-09, RN16).
+#
+# Reutilizar una sesion: `Cookie: {{loginRecepcion.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Un "resumen" es un elemento de un listado: exactamente {id, estado, patente, total, creada_en,
+# mecanico_id, falla, cliente}. Un "detalle" es el cuerpo de OrdenDetalleSalida (el del alta y las
+# transiciones). Las fechas salen con zona (Z o +00:00).
+# =============================================================================
+
+@base = http://localhost:8000
+
+
+# =============================================================================
+# A. Preparacion (casos 1-9)
+# =============================================================================
+
+### 1. Login de admin@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginAdmin
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 2. Login de recepcion@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 3. Login de mecanico@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 4. Login de mecanico2@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginMecanico2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico2@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 5. Login de cliente@example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginCliente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "cliente@example.com",
+  "password": "ClaveSegura1"
+}
+
+### 6. Login de nuevo@example.com
+# Esperado: 200 con debe_cambiar_password: true
+# @name loginNuevo
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "nuevo@example.com",
+  "password": "Provisoria1"
+}
+
+### 7. Registro de ajeno@lecturas.example.com (ficha sin vehiculos)
+# Esperado: 201 con id 8 y cliente.id 3 (el usuario 8 y la ficha 3)
+# psql: SELECT id, email FROM usuario WHERE email = 'ajeno@lecturas.example.com'
+# Esperado (psql): una fila con id 8
+# @name registroAjeno
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "ajeno@lecturas.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Ana Ajena",
+  "documento": "48000001",
+  "telefono": "1148000001"
+}
+
+### 8. Login de ajeno@lecturas.example.com
+# Esperado: 200 con debe_cambiar_password: false
+# @name loginAjeno
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ajeno@lecturas.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 9. Alta de la orden 3: vehiculo 2 con CUATRO items (caso PDF C-15, parte 2)
+# Esperado: 201 con el detalle {id: 3, estado: "PENDIENTE", patente: "AC456EF", total: "57000.00", mecanico_id: null,
+#   falla: "Revisión general con cuatro repuestos", cliente: "Laura Martínez", items: [FIL-ACE-01 1 "8500.00"/"8500.00",
+#   PAS-FRE-DEL 1 "32000.00"/"32000.00", BUJ-01 1 "4500.00"/"4500.00", ACE-5W30-1L 1 "12000.00"/"12000.00"],
+#   historial: [{null -> PENDIENTE, usuario_id 3}]}
+# psql: SELECT id, vehiculo_id, estado, total FROM orden_trabajo ORDER BY id
+# Esperado (psql): 1 1 PENDIENTE 56500.00; 2 3 EN_REPARACION 18000.00; 3 2 PENDIENTE 57000.00
+# @name alta4
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": 2,
+  "falla": "Revisión general con cuatro repuestos",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1},
+    {"repuesto_id": 2, "cantidad": 1},
+    {"repuesto_id": 3, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 1}
+  ]
+}
+
+
+# =============================================================================
+# B. Acceso al listado: requisito "Listado de ordenes solo para el personal" (casos 10-17)
+# =============================================================================
+
+### 10. GET /ordenes sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+
+### 11. GET /ordenes?estado=REABIERTA sin cookie (401, no 422)
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=REABIERTA
+
+### 12. GET /ordenes con loginNuevo (cambio de contraseña pendiente)
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+### 13. GET /ordenes con loginCliente (sin rol de personal)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 14. GET /ordenes?estado=REABIERTA con loginCliente (rol antes que 422)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=REABIERTA
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 15. GET /ordenes con loginAjeno (cliente sin vehiculos)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 16. GET /ordenes con loginMecanico2 (no esta asignado a ninguna orden)
+# Esperado: 200 con total 3 (el mecanico ve todas las ordenes)
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 17. GET /ordenes con loginAdmin
+# Esperado: 200 con total 3
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+
+# =============================================================================
+# C. Listado y filtro (casos 18-32; todos con loginRecepcion)
+# =============================================================================
+
+### 18. GET /ordenes: mas nueva primero
+# Esperado: 200 con {items: [3, 2, 1], total: 3, page: 1, size: 20, pages: 1}; resumen de la 3: {id: 3, estado: "PENDIENTE",
+#   patente: "AC456EF", total: "57000.00", creada_en, mecanico_id: null, falla: "Revisión general con cuatro repuestos",
+#   cliente: "Laura Martínez"}; de la 2: {estado: "EN_REPARACION", patente: "AD789GH", total: "18000.00", mecanico_id: 4,
+#   falla: "El motor falla en frío y tironea al acelerar", cliente: "Jorge Pérez"}; de la 1: {estado: "PENDIENTE",
+#   patente: "AB123CD", total: "56500.00", mecanico_id: null, falla: "Service de los 30.000 km: cambio de aceite y filtro",
+#   cliente: "Laura Martínez"}; ningun elemento tiene items ni historial
+# Con SQL_ECHO=true: un SELECT count(*) y un unico SELECT con LEFT OUTER JOIN vehiculo AS vehiculo_1, LEFT OUTER JOIN
+#   cliente AS cliente_1 y ORDER BY orden_trabajo.id DESC, sin FOR UPDATE
+# @no-cookie-jar
+GET {{base}}/ordenes
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 19. GET /ordenes?estado=PENDIENTE
+# Esperado: 200 con items [3, 1], total 2, pages 1
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=PENDIENTE
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 20. GET /ordenes?estado=EN_REPARACION
+# Esperado: 200 con items [2], total 1
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=EN_REPARACION
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 21. GET /ordenes?estado=TERMINADA (sin ordenes)
+# Esperado: 200 con items: [], total: 0, page: 1, pages: 1
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=TERMINADA
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 22. GET /ordenes?estado=CANCELADA (sin ordenes todavia)
+# Esperado: 200 con items: [], total: 0
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=CANCELADA
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 23. GET /ordenes?estado=pendiente (minusculas)
+# Esperado: 422 sobre ["query", "estado"] con type "enum"; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=pendiente
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 24. GET /ordenes?estado=REABIERTA (estado que el contrato no declara)
+# Esperado: 422 sobre ["query", "estado"] con type "enum"; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=REABIERTA
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 25. GET /ordenes?estado= (vacio)
+# Esperado: 422 sobre ["query", "estado"] con type "enum"; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 26. GET /ordenes?size=2
+# Esperado: 200 con items [3, 2], total 3, pages 2
+# @no-cookie-jar
+GET {{base}}/ordenes?size=2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 27. GET /ordenes?page=2&size=2
+# Esperado: 200 con items [1], page 2, pages 2, total 3
+# @no-cookie-jar
+GET {{base}}/ordenes?page=2&size=2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 28. GET /ordenes?page=3&size=2 (pagina inexistente)
+# Esperado: 422 {"detail": "La página 3 no existe: hay 2"}
+# @no-cookie-jar
+GET {{base}}/ordenes?page=3&size=2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 29. GET /ordenes?estado=PENDIENTE&size=1&page=2
+# Esperado: 200 con items [1], total 2, pages 2
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=PENDIENTE&size=1&page=2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 30. GET /ordenes?size=500
+# Esperado: 422 sobre ["query", "size"]; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?size=500
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 31. GET /ordenes?page=0
+# Esperado: 422 sobre ["query", "page"]; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?page=0
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 32. GET /ordenes?page=abc
+# Esperado: 422 sobre ["query", "page"]; la consola no muestra ningun SELECT FROM orden_trabajo
+# @no-cookie-jar
+GET {{base}}/ordenes?page=abc
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+
+# =============================================================================
+# D. Caso PDF C-17: catalogo de estados y filtro por un estado que el contrato no declara (casos 33-35)
+# =============================================================================
+
+### 33. GET /estados-orden sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/estados-orden
+
+### 34. GET /estados-orden con loginCliente (cualquier usuario autenticado)
+# Esperado: 200 [{codigo: "PENDIENTE", descripcion: "Orden registrada, a la espera de un mecánico", posicion: 1, es_final: false},
+#   {"EN_REPARACION", "Un mecánico está trabajando en el vehículo", 2, false},
+#   {"TERMINADA", "Reparación terminada; repuestos descontados del stock", 3, true},
+#   {"CANCELADA", "Orden cancelada sin reparación", 4, true}]
+# @no-cookie-jar
+GET {{base}}/estados-orden
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 35. GET /ordenes?estado=REABIERTA con loginAdmin
+# Esperado: 422 sobre ["query", "estado"] con type "enum"
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=REABIERTA
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+
+# =============================================================================
+# E. Detalle: requisitos "Detalle de una orden para el personal o el dueño", "Orden de los rechazos del detalle" y "Forma del detalle" (casos 36-51)
+# =============================================================================
+
+### 36. GET /ordenes/1 sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+
+### 37. GET /ordenes/abc sin cookie (401, no 422)
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/ordenes/abc
+
+### 38. GET /ordenes/1 con loginNuevo
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+### 39. GET /ordenes/abc con loginRecepcion
+# Esperado: 422 sobre ["path", "orden_id"]
+# @no-cookie-jar
+GET {{base}}/ordenes/abc
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 40. GET /ordenes/0 con loginRecepcion
+# Esperado: 422 sobre ["path", "orden_id"]
+# @no-cookie-jar
+GET {{base}}/ordenes/0
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 41. GET /ordenes/2147483648 con loginRecepcion
+# Esperado: 422 sobre ["path", "orden_id"]
+# @no-cookie-jar
+GET {{base}}/ordenes/2147483648
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 42. GET /ordenes/999999 con loginRecepcion
+# Esperado: 404 {"detail": "La orden no existe"}
+# Con SQL_ECHO=true la consola muestra 2 sentencias (sesion y la busqueda de la orden)
+# @no-cookie-jar
+GET {{base}}/ordenes/999999
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 43. GET /ordenes/999999 con loginAjeno (404 antes que 403)
+# Esperado: 404 {"detail": "La orden no existe"}
+# @no-cookie-jar
+GET {{base}}/ordenes/999999
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 44. GET /ordenes/1 con loginRecepcion (caso PDF C-15, 2 items)
+# Esperado: 200 con el detalle {id: 1, estado: "PENDIENTE", patente: "AB123CD", total: "56500.00", creada_en, mecanico_id: null,
+#   falla: "Service de los 30.000 km: cambio de aceite y filtro", cliente: "Laura Martínez", items: [{repuesto_id: 1,
+#   codigo: "FIL-ACE-01", descripcion: "Filtro de aceite", cantidad: 1, precio_unitario: "8500.00", subtotal: "8500.00"},
+#   {repuesto_id: 4, codigo: "ACE-5W30-1L", descripcion: "Aceite 5W30 por litro", cantidad: 4, precio_unitario: "12000.00",
+#   subtotal: "48000.00"}], historial: [{desde_estado: null, hasta_estado: "PENDIENTE", usuario_id: 3, cuando}]}
+# Con SQL_ECHO=true la consola muestra 5 sentencias, todas SELECT (1 de sesion + 3 del detalle + 1 de roles)
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 45. GET /ordenes/3 con loginRecepcion (caso PDF C-15, 4 items)
+# Esperado: 200 con los mismos campos y valores que la respuesta del caso 9 (alta4)
+# Con SQL_ECHO=true la consola muestra las mismas 5 sentencias que el caso 44
+# @no-cookie-jar
+GET {{base}}/ordenes/3
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 46. GET /ordenes/2 con loginMecanico2 (mecanico no asignado)
+# Esperado: 200 con el detalle {estado: "EN_REPARACION", patente: "AD789GH", total: "18000.00", mecanico_id: 4, cliente: "Jorge Pérez",
+#   items: [{repuesto_id: 3, codigo: "BUJ-01", descripcion: "Bujía", cantidad: 4, precio_unitario: "4500.00", subtotal: "18000.00"}],
+#   historial: [{null -> PENDIENTE, usuario_id 3}, {PENDIENTE -> EN_REPARACION, usuario_id 4}]}
+# @no-cookie-jar
+GET {{base}}/ordenes/2
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 47. GET /ordenes/2 con loginAdmin
+# Esperado: 200 con el mismo cuerpo que el caso 46
+# @no-cookie-jar
+GET {{base}}/ordenes/2
+Cookie: {{loginAdmin.response.headers.Set-Cookie}}
+
+### 48. GET /ordenes/1 con loginCliente (duena del vehiculo)
+# Esperado: 200 con el mismo cuerpo que el caso 44
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 49. GET /ordenes/3 con loginCliente (duena)
+# Esperado: 200 con el mismo cuerpo que el caso 45
+# @no-cookie-jar
+GET {{base}}/ordenes/3
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 50. GET /ordenes/2 con loginCliente (vehiculo de una ficha sin usuario)
+# Esperado: 403 {"detail": "Sólo el personal del taller o el dueño del vehículo puede ver la orden"}
+# @no-cookie-jar
+GET {{base}}/ordenes/2
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 51. GET /ordenes/1 con loginAjeno (orden de otro cliente)
+# Esperado: 403 {"detail": "Sólo el personal del taller o el dueño del vehículo puede ver la orden"}
+# @no-cookie-jar
+GET {{base}}/ordenes/1
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+
+# =============================================================================
+# F. Ordenes propias: requisito "Ordenes propias del usuario autenticado" (casos 52-63)
+# =============================================================================
+
+### 52. GET /mis-ordenes sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+
+### 53. GET /mis-ordenes con loginNuevo
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+Cookie: {{loginNuevo.response.headers.Set-Cookie}}
+
+### 54. GET /mis-ordenes con loginCliente
+# Esperado: 200 con {items: [3, 1] (resumenes, con cliente "Laura Martínez"), total: 2, page: 1, size: 20, pages: 1} y nunca la orden 2
+# Con SQL_ECHO=true: un SELECT count(*) y un unico SELECT ... FROM orden_trabajo JOIN vehiculo ON ... JOIN cliente ON ...
+#   WHERE cliente.usuario_id = $1 ORDER BY orden_trabajo.id DESC, sin vehiculo_1
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 55. GET /mis-ordenes?size=1 con loginCliente
+# Esperado: 200 con items [3], total 2, pages 2
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?size=1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 56. GET /mis-ordenes?page=2&size=1 con loginCliente
+# Esperado: 200 con items [1], page 2
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?page=2&size=1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 57. GET /mis-ordenes?page=3&size=1 con loginCliente
+# Esperado: 422 {"detail": "La página 3 no existe: hay 2"}
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?page=3&size=1
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 58. GET /mis-ordenes?size=0 con loginCliente
+# Esperado: 422 sobre ["query", "size"]
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?size=0
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 59. GET /mis-ordenes?page=abc con loginCliente
+# Esperado: 422 sobre ["query", "page"]
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?page=abc
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 60. GET /mis-ordenes con loginAjeno (ficha sin vehiculos)
+# Esperado: 200 con {items: [], total: 0, page: 1, size: 20, pages: 1}
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 61. GET /mis-ordenes con loginMecanico (sin ficha de cliente)
+# Esperado: 200 con items: [] y total: 0
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 62. GET /mis-ordenes?page=2 con loginAjeno
+# Esperado: 422 {"detail": "La página 2 no existe: hay 1"}
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?page=2
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 63. GET /mis-ordenes?estado=TERMINADA con loginCliente (la ruta no declara estado: se ignora, S-10)
+# Esperado: 200 igual que el caso 54
+# @no-cookie-jar
+GET {{base}}/mis-ordenes?estado=TERMINADA
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+
+# =============================================================================
+# G. Vehiculo dado de baja (S-09, RN16) (casos 64-70)
+# =============================================================================
+
+### 64. Cancelar la orden 3 con loginCliente (preparacion, C-14)
+# Esperado: 200 con estado: "CANCELADA"
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 65. DELETE /vehiculos/2 con loginRecepcion (baja logica)
+# Esperado: 204 sin cuerpo
+# psql: SELECT borrado_en IS NOT NULL FROM vehiculo WHERE id = 2
+# Esperado (psql): t
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/2
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 66. GET /mis-vehiculos con loginCliente
+# Esperado: 200 con sólo AB123CD
+# @no-cookie-jar
+GET {{base}}/mis-vehiculos
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 67. GET /mis-ordenes con loginCliente (la orden del vehiculo dado de baja sigue)
+# Esperado: 200 con items [3, 1] y total 2 (la 3 sigue, estado: "CANCELADA", patente: "AC456EF")
+# @no-cookie-jar
+GET {{base}}/mis-ordenes
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 68. GET /ordenes/3 con loginCliente (vehiculo dado de baja)
+# Esperado: 200 con {estado: "CANCELADA", patente: "AC456EF", mecanico_id: null, historial: [{null -> PENDIENTE, usuario_id 3},
+#   {PENDIENTE -> CANCELADA, usuario_id 6}]}
+# @no-cookie-jar
+GET {{base}}/ordenes/3
+Cookie: {{loginCliente.response.headers.Set-Cookie}}
+
+### 69. GET /ordenes?estado=CANCELADA con loginRecepcion
+# Esperado: 200 con items [3], total 1, patente: "AC456EF"
+# psql (cierre del archivo, caso 70): SELECT count(*) FROM orden_trabajo; SELECT count(*) FROM item_orden;
+#   SELECT count(*) FROM historial_estado_orden; SELECT id, borrado_en IS NOT NULL FROM vehiculo ORDER BY id
+# Esperado (psql): 3; 7; 5; 1 f, 2 t, 3 f
+# @no-cookie-jar
+GET {{base}}/ordenes?estado=CANCELADA
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+
+### 70. Cierre (psql): las tres ordenes, sus items y su historial
+# psql: SELECT count(*) FROM orden_trabajo;
+# Esperado (psql): 3
+# psql: SELECT count(*) FROM item_orden;
+# Esperado (psql): 7
+# psql: SELECT count(*) FROM historial_estado_orden;
+# Esperado (psql): 5
+# psql: SELECT id, borrado_en IS NOT NULL FROM vehiculo ORDER BY id;
+# Esperado (psql): 1 f; 2 t; 3 f
+
+# =============================================================================
+# Verificados por script (verificar_c15.py, design D9 a-e; no se versiona): misma cantidad de
+# sentencias en el detalle con 2 y con 4 items, con la evidencia en test/evidencia_c15.txt;
+# listados con 1 y con N ordenes; sin escrituras (tambien en 403, 404 y 422); sin bloqueos de fila;
+# OpenAPI.
+#
+# Escenario (spec work-orders, delta de C-15) -> caso
+#   Listado de ordenes solo para el personal: Sin sesion -> 10, 11; Cliente sin rol de personal -> 13,
+#     14, 15; Cambio de contraseña pendiente -> 12; Un mecanico ve todas las ordenes -> 16;
+#     Recepcion y administracion -> 17, 18
+#   Filtro por estado: Filtrar por un estado -> 19; Estado sin ordenes -> 21, 22; Estado que el
+#     contrato no declara (PDF C-17) -> 24, 35; Codigo en minusculas o vacio -> 23, 25; Total con el
+#     filtro -> 29 (y 20)
+#   Orden y paginacion de los listados: Mas nueva primero -> 18; Segunda pagina -> 27 (y 26);
+#     Pagina inexistente -> 28, 57, 62; Tamaño fuera de rango -> 30, 58 (y 31, 32, 59)
+#   Resumen de una orden en los listados: Forma exacta del resumen -> 18, 54; Datos del vehiculo y
+#     del cliente -> 18; Orden sin mecanico -> 18
+#   Detalle de una orden para el personal o el dueño: Personal no asignado -> 46; Dueño del
+#     vehiculo -> 48, 49; Orden de otro cliente -> 51; Ficha sin usuario -> 50; Vehiculo dado de
+#     baja -> 68
+#   Orden de los rechazos del detalle: Sin sesion y con id invalido -> 36, 37, 38; Id invalido ->
+#     39, 40, 41; Orden inexistente para un ajeno -> 43 (y 42)
+#   Forma del detalle de una orden: Orden con dos items -> 44; Historial de una orden iniciada ->
+#     46; Igual que la respuesta del alta -> 45 (contra 9)
+#   Ordenes propias del usuario autenticado: Cliente con ordenes -> 54, 55, 56; Usuario sin ficha ->
+#     61; Ficha sin vehiculos -> 60, 62; Orden de un vehiculo dado de baja -> 64, 65, 67; Sin sesion o
+#     con cambio pendiente -> 52, 53
+#   Lecturas con un numero fijo de consultas: Detalle con 2 y con 4 items (PDF C-15) -> 44, 45 y
+#     verificar_c15.py (a); Pagina con una y con varias ordenes -> verificar_c15.py (b2); Ordenes
+#     propias con una y con dos ordenes -> verificar_c15.py (b1, b2)
+#   Las lecturas no escriben ni bloquean: Sin escrituras -> verificar_c15.py (c); Sin bloqueos ->
+#     verificar_c15.py (d)
+# =============================================================================
