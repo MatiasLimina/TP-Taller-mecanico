@@ -30,10 +30,10 @@
 **Decisión:** la decisión la toma el servicio (403 por relación, luego 409 por estado), porque el dueño no tiene rol de personal.
 
 ### DD-10 — Aviso con `BackgroundTasks`
-**Decisión:** simulado, en el mismo proceso, sólo tras commit. **Riesgo aceptado:** se pierde si el proceso se reinicia; sin reintento (se resuelve en cap. 8).
+**Decisión:** simulado, en el mismo proceso, sólo tras commit. **Riesgo aceptado:** se pierde si el proceso se reinicia; sin reintento (se resuelve en cap. 8). El aviso se registra con el logger `uvicorn.error.avisos` a nivel INFO, porque el proyecto no configura logging (C-14 S-13).
 
 ### DD-11 — Concurrencia diferida
-**Decisión:** la consigna no evalúa concurrencia (cap. 7), pero la actualización perdida de stock **queda evitada** (C-11, S-02): el punto único de escritura aplica cada movimiento con un `UPDATE` atómico condicional (`stock + :delta >= 0 … RETURNING`), en orden ascendente de `repuesto_id`, sin bloqueo explícito ni reintentos. Dos órdenes simultáneas no descuentan sobre el mismo valor leído; si el stock no alcanza, 409 propio y rollback total. *(Antes: se aceptaba la actualización perdida.)* El alta de órdenes (C-13) se serializa con la baja de vehículos y de repuestos por bloqueos de fila en un orden global (orden → vehículo → repuestos por id), sin interbloqueos.
+**Decisión:** la consigna no evalúa concurrencia (cap. 7), pero la actualización perdida de stock **queda evitada** (C-11, S-02): el punto único de escritura aplica cada movimiento con un `UPDATE` atómico condicional (`stock + :delta >= 0 … RETURNING`), en orden ascendente de `repuesto_id`, sin bloqueo explícito ni reintentos. Dos órdenes simultáneas no descuentan sobre el mismo valor leído; si el stock no alcanza, 409 propio y rollback total. *(Antes: se aceptaba la actualización perdida.)* El alta de órdenes (C-13) se serializa con la baja de vehículos y de repuestos por bloqueos de fila en un orden global (orden → vehículo → repuestos por id), sin interbloqueos. Las transiciones de orden (C-14) se serializan con el bloqueo `FOR UPDATE` sobre la fila de la orden, tomado primero.
 
 ## Supuestos inferidos
 

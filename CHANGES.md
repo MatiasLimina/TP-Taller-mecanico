@@ -75,7 +75,7 @@ GATE 5: C-11 ✓
   → C-13 ordenes-alta-estados           [hecho]
 
 GATE 6: C-13 ✓ (y C-12 ✓)
-  → C-14 ordenes-transiciones
+  → C-14 ordenes-transiciones           [hecho]
   → C-15 ordenes-lecturas-sin-n-plus-1
 
 GATE 7: C-06, C-09, C-14, C-15 ✓
@@ -340,7 +340,7 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
   - `knowledge-base/04_modelo_de_datos.md` §estado_orden, §orden_trabajo, §item_orden
 
 ### [C-14] `ordenes-transiciones`
-- **Estado**: `[ ]` pendiente
+- **Estado**: `[x]` completado
 - **Scope**:
   - `POST /ordenes/{id}/iniciar` (MECANICO): PENDIENTE → EN_REPARACION, el mecánico queda asignado; otro estado → 409. Caso PDF C11 (orden #2 requiere reponer antes de terminar)
   - `POST /ordenes/{id}/terminar` (mecánico asignado o ADMIN): un UoW valida permiso (403) y estado (409), descuenta stock de cada ítem por el punto único de escritura, crea `movimiento_stock` (cantidad negativa, `orden_id`), cambia a TERMINADA + `historial_estado_orden`; falta de stock → 409 con rollback total (RN13); `BackgroundTasks` (aviso simulado `sleep(0.5)` + log) agendado sólo tras el commit. Caso PDF C12
@@ -407,4 +407,4 @@ Quién hace qué (integrantes, herramientas, pasos, revisión cruzada y entregab
 | 6 Verificación | C-16 | BAJO |
 
 **Total**: 16 changes · 6 fases · camino crítico de 9 changes · 8 gates (GATE 0-7).
-**Estado (2026-10-30)**: C-01…C-13 completados; C-14 propuesto; próximo: C-14.
+**Estado (2026-10-30)**: C-01…C-14 completados; próximos: propose de C-15 y C-16.

@@ -60,6 +60,8 @@ Toda ruta del grupo protegido responde además **401** sin sesión y **403** con
 
 **Cancelar no lleva `requiere_rol`**: el dueño del vehículo no tiene rol de personal. El servicio decide: primero quién es y su relación con la orden (403), luego si el estado lo permite (409) — RN12.
 
+**Transiciones (`iniciar`, `terminar`, `cancelar`)**: un `IdRuta` inválido responde 422. «Mecánico asignado» exige que el rol MECANICO siga vigente (C-14 S-04).
+
 ## Rutas públicas / abiertas
 - `GET /health/live`, `GET /health/ready`
 - `POST /auth/registro`, `POST /auth/login`

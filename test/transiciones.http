@@ -1,0 +1,1109 @@
+# =============================================================================
+# test/transiciones.http -- Casos de C-14 ordenes-transiciones
+#   (POST /ordenes/{id}/iniciar, POST /ordenes/{id}/terminar, POST /ordenes/{id}/cancelar --
+#    las transiciones de estado de una orden de trabajo; terminar descuenta el stock por el
+#    punto unico de escritura de stock (RN14) y agenda el aviso simulado al cliente)
+#
+# Cliente HTTP: extension REST Client de VS Code (o el cliente HTTP de JetBrains).
+# Servidor: .venv\Scripts\python.exe -m uvicorn main:app --port 8000
+# Las comprobaciones de filas se hacen con psql (consultas en cada caso). El aviso de las
+# ordenes terminadas se ve en la consola de uvicorn (logger uvicorn.error.avisos).
+#
+# ESTADO CONOCIDO ANTES DE CORRER EL ARCHIVO DE ARRIBA ABAJO
+#   (migrado a la ultima revision; sin seed -- C-06 -- la base queda sin repuestos, ordenes ni
+#    catalogo de estados):
+#
+#   -- 1) vacia el dominio de ordenes y repuestos. El disparador de solo agregado rechaza DELETE en
+#   --    historial_estado_orden, movimiento_stock e historial_precio_repuesto, y una orden creada por
+#   --    la API no se puede borrar porque su historial la referencia; TRUNCATE no dispara el
+#   --    disparador (es la via que usa seed.py para recargar el estado inicial). Sin CASCADE: falla
+#   --    si otra tabla los referenciara.
+#   --    ATENCION: vacia TODAS las ordenes y TODOS los repuestos, tambien los de otros datos de
+#   --    desarrollo.
+#   TRUNCATE historial_estado_orden, item_orden, movimiento_stock, historial_precio_repuesto,
+#     orden_trabajo, repuesto RESTART IDENTITY;
+#
+#   -- 2) limpia SOLO lo de este archivo (correos @transiciones.example.com, documentos 470000xx,
+#   --    patentes ZT...):
+#   DELETE FROM vehiculo WHERE patente LIKE 'ZT%';
+#   DELETE FROM evento_seguridad WHERE actor LIKE '%@transiciones.example.com'
+#     OR accion LIKE '%@transiciones.example.com%';
+#   DELETE FROM intento_acceso WHERE email LIKE '%@transiciones.example.com';
+#   DELETE FROM asignacion_rol WHERE usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@transiciones.example.com')
+#     OR otorgada_por IN (SELECT id FROM usuario WHERE email LIKE '%@transiciones.example.com');
+#   DELETE FROM vehiculo WHERE cliente_id IN (SELECT id FROM cliente WHERE documento LIKE '470000%');
+#   DELETE FROM cliente WHERE documento LIKE '470000%' OR usuario_id IN
+#     (SELECT id FROM usuario WHERE email LIKE '%@transiciones.example.com');
+#   DELETE FROM usuario WHERE email LIKE '%@transiciones.example.com';
+#
+#   -- 3) catalogo de estados (C-06 todavia no existe; si ya esta cargado no cambia nada) y
+#   --    es_final conocido (una corrida anterior cortada en el caso 49 lo dejaria alterado):
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('PENDIENTE', 'Pendiente', 1, false), ('EN_REPARACION', 'En reparación', 2, false),
+#     ('TERMINADA', 'Terminada', 3, true), ('CANCELADA', 'Cancelada', 4, true)
+#   ON CONFLICT DO NOTHING;
+#   UPDATE estado_orden SET es_final = (codigo IN ('TERMINADA', 'CANCELADA'));
+#
+# Si C-06 (seed) ya existe, correr `python seed.py` antes y luego el bloque de arriba.
+# Rangos propios: correos @transiciones.example.com, documentos 470000xx (C-10 usa 430000xx, C-11
+# 440000xx, C-12 450000xx, C-13 460000xx), patentes ZT... (C-10 usa ZC..., C-13 ZO...), codigos de
+# repuesto TRN-... (C-12 usa STK-..., C-13 ORD-...; el script verificar_c14.py usa ZTS... y
+# SCRIPT-C14-...).
+# El archivo es de una sola pasada sobre ese estado: los ids de repuesto (1 a 5) y de orden (1 a 8)
+# salen de RESTART IDENTITY.
+#
+# Reutilizar una sesion: `Cookie: {{loginMecanico.response.headers.Set-Cookie}}` (todas las
+# peticiones llevan `# @no-cookie-jar`: nada se envia por el jar del cliente).
+#
+# Personas: jefa (ADMIN), recepcion (RECEPCION), mecanico y mecanico2 (MECANICO), duena (solo
+# CLIENTE; duena de dos vehiculos), ajeno (solo CLIENTE, sin vehiculos), pendiente (debe cambiar
+# la contrasena) y Jorge (ficha sin usuario, creada por recepcion). Todas las cuentas se crean por
+# registro + INSERT del rol.
+#
+# Repuestos (ids de RESTART IDENTITY): 1 TRN-FIL-01 (stock 10), 2 TRN-FRE-01 (4), 3 TRN-BUJ-01 (2),
+# 4 TRN-ACE-01 (20), 5 TRN-BAJA-01 (3; se da de baja en el caso 72).
+# Ordenes (todas creadas PENDIENTES por recepcion, ids 1 a 8): 1 aceite y filtro (duena, vehiculo 1);
+# 2 cuatro bujias con stock 2 (Jorge; caso PDF C-11/C-12); 3 y 4 para cancelar; 5 con el segundo
+# repuesto sin stock (rollback total); 6 con el repuesto que se da de baja; 7 para el rol revocado;
+# 8 para el catalogo y la cancelacion del ADMIN.
+# =============================================================================
+
+@base = http://localhost:8000
+
+
+# =============================================================================
+# A. Preparacion
+# =============================================================================
+
+### 1. Registro de jefa@transiciones.example.com
+# Esperado: 201 con {id, email, nombre, cliente:{...}}
+# @name registroJefa
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "jefa@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Josefina Jefa",
+  "documento": "47000001",
+  "telefono": "1147000001"
+}
+
+### 2. Registro de recepcion@transiciones.example.com
+# Esperado: 201
+# @name registroRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "recepcion@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Rita Recepcion",
+  "documento": "47000002",
+  "telefono": "1147000002"
+}
+
+### 3. Registro de mecanico@transiciones.example.com
+# Esperado: 201
+# @name registroMecanico
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "mecanico@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Mario Mecanico",
+  "documento": "47000003",
+  "telefono": "1147000003"
+}
+
+### 4. Registro de mecanico2@transiciones.example.com
+# Esperado: 201
+# @name registroMecanico2
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "mecanico2@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Marta Mecanica",
+  "documento": "47000004",
+  "telefono": "1147000004"
+}
+
+### 5. Registro de duena@transiciones.example.com
+# Esperado: 201 con cliente.id
+# @name registroDuena
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "duena@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Laura Duena",
+  "documento": "47000005",
+  "telefono": "1147000005"
+}
+
+### 6. Registro de ajeno@transiciones.example.com
+# Esperado: 201
+# @name registroAjeno
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "ajeno@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Andres Ajeno",
+  "documento": "47000006",
+  "telefono": "1147000006"
+}
+
+### 7. Registro de pendiente@transiciones.example.com
+# Esperado: 201
+# Despues (psql):
+#   jefa pasa a ser ADMIN, recepcion RECEPCION, mecanico y mecanico2 MECANICO, y pendiente debe
+#   cambiar la contrasena:
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'ADMIN' FROM usuario WHERE email = 'jefa@transiciones.example.com';
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'RECEPCION' FROM usuario WHERE email = 'recepcion@transiciones.example.com';
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'MECANICO' FROM usuario WHERE email = 'mecanico@transiciones.example.com';
+#   INSERT INTO asignacion_rol (usuario_id, rol)
+#     SELECT id, 'MECANICO' FROM usuario WHERE email = 'mecanico2@transiciones.example.com';
+#   UPDATE usuario SET debe_cambiar_password = true WHERE email = 'pendiente@transiciones.example.com';
+# @name registroPendiente
+# @no-cookie-jar
+POST {{base}}/auth/registro
+Content-Type: application/json
+
+{
+  "email": "pendiente@transiciones.example.com",
+  "password": "ClaveSegura1",
+  "nombre": "Pablo Pendiente",
+  "documento": "47000007",
+  "telefono": "1147000007"
+}
+
+### 8. Login de jefa
+# Esperado: 200 con Set-Cookie: access_token=<jwt>; HttpOnly; Max-Age=1800; Path=/; SameSite=lax
+# @name loginJefa
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "jefa@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 9. Login de recepcion
+# Esperado: 200
+# @name loginRecepcion
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "recepcion@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 10. Login de mecanico
+# Esperado: 200
+# @name loginMecanico
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 11. Login de mecanico2
+# Esperado: 200
+# @name loginMecanico2
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "mecanico2@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 12. Login de duena
+# Esperado: 200
+# @name loginDuena
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "duena@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 13. Login de ajeno
+# Esperado: 200
+# @name loginAjeno
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "ajeno@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 14. Login de pendiente
+# Esperado: 200 (con debe_cambiar_password: true)
+# @name loginPendiente
+# @no-cookie-jar
+POST {{base}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "pendiente@transiciones.example.com",
+  "password": "ClaveSegura1"
+}
+
+### 15. Alta del repuesto TRN-FIL-01 (id 1)
+# Esperado: 201 con "id": 1, "precio": "8500.00", "stock": 10
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "TRN-FIL-01",
+  "descripcion": "Filtro de aceite",
+  "precio": 8500,
+  "stock_inicial": 10
+}
+
+### 16. Alta del repuesto TRN-FRE-01 (id 2)
+# Esperado: 201 con "id": 2, "precio": "32000.00", "stock": 4
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "TRN-FRE-01",
+  "descripcion": "Pastillas de freno",
+  "precio": 32000,
+  "stock_inicial": 4
+}
+
+### 17. Alta del repuesto TRN-BUJ-01 (id 3)
+# Esperado: 201 con "id": 3, "precio": "4500.00", "stock": 2
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "TRN-BUJ-01",
+  "descripcion": "Bujía",
+  "precio": 4500,
+  "stock_inicial": 2
+}
+
+### 18. Alta del repuesto TRN-ACE-01 (id 4)
+# Esperado: 201 con "id": 4, "precio": "12000.00", "stock": 20
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "TRN-ACE-01",
+  "descripcion": "Aceite 5W30 por litro",
+  "precio": 12000,
+  "stock_inicial": 20
+}
+
+### 19. Alta del repuesto TRN-BAJA-01 (id 5)
+# Esperado: 201 con "id": 5, "precio": "1000.00", "stock": 3
+# @no-cookie-jar
+POST {{base}}/repuestos
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "codigo": "TRN-BAJA-01",
+  "descripcion": "Repuesto que se discontinúa",
+  "precio": 1000,
+  "stock_inicial": 3
+}
+
+### 20. Ficha de Jorge, un cliente sin usuario (creada por recepcion)
+# Esperado: 201 con "usuario_id": null
+# @name fichaJorge
+# @no-cookie-jar
+POST {{base}}/clientes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "nombre": "Jorge Sin Usuario",
+  "documento": "47000010",
+  "telefono": "1147000010"
+}
+
+### 21. Vehiculo ZTR001
+# Esperado: 201 con "patente": "ZTR001"
+# @name vehDuena1
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZTR001",
+  "marca": "Ford",
+  "modelo": "Fiesta",
+  "anio": 2015
+}
+
+### 22. Vehiculo ZTR002
+# Esperado: 201 con "patente": "ZTR002"
+# @name vehDuena2
+# @no-cookie-jar
+POST {{base}}/clientes/{{registroDuena.response.body.$.cliente.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZTR002",
+  "marca": "Fiat",
+  "modelo": "Uno",
+  "anio": 2012
+}
+
+### 23. Vehiculo ZTR003
+# Esperado: 201 con "patente": "ZTR003"
+# @name vehJorge
+# @no-cookie-jar
+POST {{base}}/clientes/{{fichaJorge.response.body.$.id}}/vehiculos
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "patente": "ZTR003",
+  "marca": "Renault",
+  "modelo": "Clio",
+  "anio": 2018
+}
+
+### 24. Alta de la orden 1: aceite y filtro de la duena
+# Esperado: 201 con "id": 1, "estado": "PENDIENTE", "mecanico_id": null y "total": "56500.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena1.response.body.$.id}},
+  "falla": "Cambio de aceite y filtro",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1},
+    {"repuesto_id": 4, "cantidad": 4}
+  ]
+}
+
+### 25. Alta de la orden 2: cuatro bujias con stock 2 (caso PDF C-11/C-12)
+# Esperado: 201 con "id": 2, "estado": "PENDIENTE", "mecanico_id": null y "total": "18000.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehJorge.response.body.$.id}},
+  "falla": "Falla de encendido",
+  "items": [
+    {"repuesto_id": 3, "cantidad": 4}
+  ]
+}
+
+### 26. Alta de la orden 3: para cancelar por la duena
+# Esperado: 201 con "id": 3, "estado": "PENDIENTE", "mecanico_id": null y "total": "8500.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena1.response.body.$.id}},
+  "falla": "Revisión general",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1}
+  ]
+}
+
+### 27. Alta de la orden 4: de Jorge, sin dueno con usuario
+# Esperado: 201 con "id": 4, "estado": "PENDIENTE", "mecanico_id": null y "total": "8500.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehJorge.response.body.$.id}},
+  "falla": "Ruido en el motor",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1}
+  ]
+}
+
+### 28. Alta de la orden 5: el segundo repuesto por id no alcanza
+# Esperado: 201 con "id": 5, "estado": "PENDIENTE", "mecanico_id": null y "total": "189000.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena2.response.body.$.id}},
+  "falla": "Frenos y service",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 2},
+    {"repuesto_id": 2, "cantidad": 5},
+    {"repuesto_id": 4, "cantidad": 1}
+  ]
+}
+
+### 29. Alta de la orden 6: con el repuesto que se da de baja
+# Esperado: 201 con "id": 6, "estado": "PENDIENTE", "mecanico_id": null y "total": "2000.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena2.response.body.$.id}},
+  "falla": "Pieza discontinuada",
+  "items": [
+    {"repuesto_id": 5, "cantidad": 2}
+  ]
+}
+
+### 30. Alta de la orden 7: para el rol revocado
+# Esperado: 201 con "id": 7, "estado": "PENDIENTE", "mecanico_id": null y "total": "12000.00"
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena1.response.body.$.id}},
+  "falla": "Pérdida de aceite",
+  "items": [
+    {"repuesto_id": 4, "cantidad": 1}
+  ]
+}
+
+### 31. Alta de la orden 8: para el catalogo y la cancelacion del ADMIN
+# Esperado: 201 con "id": 8, "estado": "PENDIENTE", "mecanico_id": null y "total": "8500.00"
+# psql: las ocho ordenes quedaron PENDIENTES, sin mecanico y con su primera linea; el stock sigue en el inicial:
+#   SELECT id, estado, mecanico_id, total FROM orden_trabajo ORDER BY id;
+#     -- 8 filas: PENDIENTE | (NULL) | 56500.00, 18000.00, 8500.00, 8500.00, 189000.00, 2000.00, 12000.00, 8500.00
+#   SELECT count(*), bool_and(desde_estado IS NULL AND hasta_estado = 'PENDIENTE') FROM historial_estado_orden;  -- 8 | t
+#   SELECT id, stock FROM repuesto ORDER BY id;  -- (1,10) (2,4) (3,2) (4,20) (5,3)
+#   SELECT count(*) FROM movimiento_stock WHERE motivo = 'Stock inicial';  -- 5
+#   SELECT count(*) FROM movimiento_stock;  -- 5
+# @no-cookie-jar
+POST {{base}}/ordenes
+Content-Type: application/json
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+{
+  "vehiculo_id": {{vehDuena2.response.body.$.id}},
+  "falla": "Diagnóstico",
+  "items": [
+    {"repuesto_id": 1, "cantidad": 1}
+  ]
+}
+
+# =============================================================================
+# B. Acceso, id y orden de rechazos (specs 'Iniciar...', 'Orden inexistente e id invalido...')
+# =============================================================================
+
+### 32. iniciar sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+
+### 33. terminar sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+
+### 34. cancelar sin cookie
+# Esperado: 401 {"detail": "Se requiere iniciar sesión"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/cancelar
+
+### 35. iniciar con loginPendiente (cambio de contrasena pendiente)
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+
+### 36. cancelar con loginPendiente (cambio de contrasena pendiente)
+# Esperado: 403 {"detail": "Debe cambiar la contraseña antes de continuar"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/cancelar
+Cookie: {{loginPendiente.response.headers.Set-Cookie}}
+
+### 37. iniciar con loginDuena (solo CLIENTE)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 38. iniciar con loginRecepcion
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 39. iniciar con loginJefa (ADMIN sin MECANICO: el ADMIN no es comodin)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 40. iniciar 999999 con loginDuena (el rol se exige antes de buscar la orden)
+# Esperado: 403 {"detail": "No tiene permiso para realizar esta operación"}
+# @no-cookie-jar
+POST {{base}}/ordenes/999999/iniciar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 41. iniciar con id 0
+# Esperado: 422 con detail[].loc ["path", "orden_id"] (ge 1)
+# @no-cookie-jar
+POST {{base}}/ordenes/0/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 42. terminar con id no numerico
+# Esperado: 422 con detail[].loc ["path", "orden_id"] (no entero)
+# @no-cookie-jar
+POST {{base}}/ordenes/abc/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 43. cancelar con id por encima de INT4 (2147483648)
+# Esperado: 422 con detail[].loc ["path", "orden_id"] (le 2147483647; NO 500)
+# @no-cookie-jar
+POST {{base}}/ordenes/2147483648/cancelar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 44. iniciar una orden inexistente con loginMecanico
+# Esperado: 404 {"detail": "La orden no existe"}
+# @no-cookie-jar
+POST {{base}}/ordenes/999999/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 45. terminar una orden inexistente con loginDuena (404, no 403: la orden se busca primero, S-07)
+# Esperado: 404 {"detail": "La orden no existe"}
+# @no-cookie-jar
+POST {{base}}/ordenes/999999/terminar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 46. cancelar una orden inexistente con loginAjeno (404, no 403)
+# Esperado: 404 {"detail": "La orden no existe"}
+# @no-cookie-jar
+POST {{base}}/ordenes/999999/cancelar
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 47. GET /ordenes/1/iniciar: la ruta solo admite POST
+# Esperado: 405 (antes de C-14, sin la ruta, Starlette responde 404 o 405: anotar cual)
+# psql: los rechazos de esta seccion no cambiaron nada:
+#   SELECT count(*) FROM orden_trabajo WHERE estado = 'PENDIENTE' AND mecanico_id IS NULL;  -- 8
+#   SELECT count(*) FROM historial_estado_orden;  -- 8
+# @no-cookie-jar
+GET {{base}}/ordenes/1/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+# =============================================================================
+# C. Catalogo guiado por la base (spec 'Reglas de estado guiadas por el catalogo', S-10)
+# =============================================================================
+
+### 48. cancelar con el estado CANCELADA fuera del catalogo
+# Esperado: 409 {"detail": "El catálogo de estados no tiene el estado CANCELADA"}
+# Antes (psql):
+#   DELETE FROM estado_orden WHERE codigo = 'CANCELADA';
+# psql: la orden 8 sigue PENDIENTE con su unica linea de historial:
+#   SELECT estado FROM orden_trabajo WHERE id = 8;  -- PENDIENTE
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 8;  -- 1
+# Despues (psql):
+#   restaurar el catalogo y marcar PENDIENTE como final para el caso 49:
+#   INSERT INTO estado_orden (codigo, descripcion, posicion, es_final) VALUES
+#     ('PENDIENTE', 'Pendiente', 1, false), ('EN_REPARACION', 'En reparación', 2, false),
+#     ('TERMINADA', 'Terminada', 3, true), ('CANCELADA', 'Cancelada', 4, true)
+#   ON CONFLICT DO NOTHING;
+#   UPDATE estado_orden SET es_final = true WHERE codigo = 'PENDIENTE';
+# @no-cookie-jar
+POST {{base}}/ordenes/8/cancelar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 49. iniciar con PENDIENTE marcado como final: el catalogo decide (409 de estado final)
+# Esperado: 409 {"detail": "La orden 8 está PENDIENTE, un estado final: no admite más cambios"}
+# psql: sin cambios (la orden 8 sigue PENDIENTE sin mecanico y con una linea):
+#   SELECT estado, mecanico_id FROM orden_trabajo WHERE id = 8;  -- PENDIENTE | (NULL)
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 8;  -- 1
+# Despues (psql):
+#   devolver PENDIENTE a no final:
+#   UPDATE estado_orden SET es_final = false WHERE codigo = 'PENDIENTE';
+# @no-cookie-jar
+POST {{base}}/ordenes/8/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+# =============================================================================
+# D. Iniciar (specs 'Iniciar una orden...', 'Solo se inicia...', 'Las transiciones no reciben datos...')
+# =============================================================================
+
+### 50. iniciar la orden 1 con loginMecanico: 200 con el detalle y la linea nueva
+# Esperado: 200 exactamente {"id": 1, "estado": "EN_REPARACION", "patente": "ZTR001", "total": "56500.00",
+#   "creada_en": "<ISO con Z>", "mecanico_id": <mecanico>, "falla": "Cambio de aceite y filtro",
+#   "cliente": "Laura Duena", "items": [{"repuesto_id": 1, "codigo": "TRN-FIL-01",
+#   "descripcion": "Filtro de aceite", "cantidad": 1, "precio_unitario": "8500.00", "subtotal": "8500.00"},
+#   {"repuesto_id": 4, "codigo": "TRN-ACE-01", "descripcion": "Aceite 5W30 por litro", "cantidad": 4,
+#   "precio_unitario": "12000.00", "subtotal": "48000.00"}],
+#   "historial": [{"desde_estado": null, "hasta_estado": "PENDIENTE", "usuario_id": <recepcion>, ...},
+#   {"desde_estado": "PENDIENTE", "hasta_estado": "EN_REPARACION", "usuario_id": <mecanico>,
+#   "cuando": "<ISO con Z>"}]}
+# psql: el mecanico quedo asignado y la linea de historial es suya; el stock no se mueve:
+#   SELECT estado, mecanico_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM orden_trabajo WHERE id = 1;  -- EN_REPARACION | t
+#   SELECT desde_estado, hasta_estado, usuario_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM historial_estado_orden WHERE orden_id = 1 ORDER BY id DESC LIMIT 1;  -- PENDIENTE | EN_REPARACION | t
+#   SELECT id, stock FROM repuesto WHERE id IN (1, 4) ORDER BY id;  -- (1,10) (4,20)
+# @name iniciarOrden1
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 51. iniciar la orden 1 otra vez con el mismo mecanico
+# Esperado: 409 {"detail": "No se puede iniciar la orden 1: está EN_REPARACION y debe estar PENDIENTE"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 52. iniciar la orden 1 con otro mecanico (loginMecanico2): 409, sin reasignar
+# Esperado: 409 {"detail": "No se puede iniciar la orden 1: está EN_REPARACION y debe estar PENDIENTE"}
+# psql: el mecanico asignado sigue siendo el primero y no hay lineas nuevas:
+#   SELECT mecanico_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM orden_trabajo WHERE id = 1;  -- t
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 1;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 53. iniciar la orden 2 con un cuerpo que pide otro mecanico y otro estado: se ignora (S-02)
+# Esperado: 200 con "estado": "EN_REPARACION" y "mecanico_id" del mecanico que inicio (no el del cuerpo)
+# psql: el cuerpo no cambio nada:
+#   SELECT estado, mecanico_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM orden_trabajo WHERE id = 2;  -- EN_REPARACION | t
+# @no-cookie-jar
+POST {{base}}/ordenes/2/iniciar
+Content-Type: application/json
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+{
+  "mecanico_id": {{registroMecanico2.response.body.$.id}},
+  "estado": "TERMINADA"
+}
+
+### 54. iniciar la orden 5 con loginMecanico
+# Esperado: 200 con "estado": "EN_REPARACION"
+# @no-cookie-jar
+POST {{base}}/ordenes/5/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 55. iniciar la orden 6 con loginMecanico2
+# Esperado: 200 con "estado": "EN_REPARACION"
+# @no-cookie-jar
+POST {{base}}/ordenes/6/iniciar
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 56. iniciar la orden 7 con loginMecanico2
+# Esperado: 200 con "estado": "EN_REPARACION"
+# psql: iniciar no mueve stock ni crea movimientos (consola de uvicorn: ninguna linea de aviso):
+#   SELECT id, stock FROM repuesto ORDER BY id;  -- (1,10) (2,4) (3,2) (4,20) (5,3)
+#   SELECT count(*) FROM movimiento_stock;  -- 5
+#   SELECT count(*) FROM historial_estado_orden;  -- 13
+# @no-cookie-jar
+POST {{base}}/ordenes/7/iniciar
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+# =============================================================================
+# E. Terminar: permiso antes que estado (spec 'Terminar solo el mecanico asignado o la administracion')
+# =============================================================================
+
+### 57. terminar la orden 1 con loginDuena (CLIENTE)
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 58. terminar la orden 1 con loginMecanico2 (MECANICO no asignado)
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 59. terminar la orden 1 con loginRecepcion
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 60. terminar la orden 8 (PENDIENTE, sin asignado) con loginMecanico: 403 (S-06)
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/8/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 61. terminar la orden 8 (PENDIENTE) con loginJefa (ADMIN): pasa el permiso, falla el estado
+# Esperado: 409 {"detail": "No se puede terminar la orden 8: está PENDIENTE y debe estar EN_REPARACION"}
+# psql: nada cambio (estados, stock, movimientos e historial):
+#   SELECT id, estado FROM orden_trabajo ORDER BY id;  -- 1,2,5,6,7 EN_REPARACION; 3,4,8 PENDIENTE
+#   SELECT count(*) FROM movimiento_stock;  -- 5
+#   SELECT count(*) FROM historial_estado_orden;  -- 13
+#   SELECT id, stock FROM repuesto ORDER BY id;  -- (1,10) (2,4) (3,2) (4,20) (5,3)
+# @no-cookie-jar
+POST {{base}}/ordenes/8/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# F. Terminar (specs 'Terminar descuenta el stock...', 'Cada transicion...', 'Respuesta...', 'Aviso...')
+# =============================================================================
+
+### 62. terminar la orden 1 con loginMecanico: descuenta el stock y avisa
+# Esperado: 200 con "estado": "TERMINADA", los mismos "items" y "total" ("56500.00"), "mecanico_id" del mecanico y 3 lineas
+#   de historial (la ultima EN_REPARACION -> TERMINADA con el mecanico)
+# psql: stock descontado una vez y un movimiento por item del mecanico; consola de uvicorn: una linea 'Aviso simulado al cliente: la orden #1 del vehículo ZTR001 está terminada' ~0,5 s despues de la linea de acceso del POST:
+#   SELECT id, stock FROM repuesto WHERE id IN (1, 4) ORDER BY id;  -- (1,9) (4,16)
+#   SELECT repuesto_id, cantidad, motivo, orden_id, usuario_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM movimiento_stock WHERE orden_id = 1 ORDER BY id;  -- (1,-1,'Orden #1 terminada',1,t) (4,-4,'Orden #1 terminada',1,t)
+#   SELECT estado FROM orden_trabajo WHERE id = 1;  -- TERMINADA
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 1;  -- 3
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 63. terminar la orden 1 otra vez: estado final (sin aviso)
+# Esperado: 409 {"detail": "La orden 1 está TERMINADA, un estado final: no admite más cambios"}
+# psql: sin movimientos nuevos:
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id = 1;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes/1/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 64. cancelar la orden 1 (TERMINADA) con loginDuena, su dueña (PDF C-13: una terminada, 409)
+# Esperado: 409 {"detail": "La orden 1 está TERMINADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/1/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 65. iniciar la orden 1 (TERMINADA) con loginMecanico
+# Esperado: 409 {"detail": "La orden 1 está TERMINADA, un estado final: no admite más cambios"}
+# psql: solo los dos movimientos de la orden 1:
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id IS NOT NULL;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes/1/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+# =============================================================================
+# G. PDF C-11 y C-12: la orden 2 pide 4 bujias con stock 2 (spec 'Falta de stock al terminar revierte todo')
+# =============================================================================
+
+### 66. terminar la orden 2 sin stock suficiente (PDF C-11)
+# Esperado: 409 {"detail": "Stock insuficiente para el repuesto TRN-BUJ-01: hay 2 y se necesitan 4"}
+# psql: la orden sigue EN_REPARACION, el stock intacto y sin aviso en la consola:
+#   SELECT estado, mecanico_id = (SELECT id FROM usuario WHERE email = 'mecanico@transiciones.example.com') FROM orden_trabajo WHERE id = 2;  -- EN_REPARACION | t
+#   SELECT stock FROM repuesto WHERE id = 3;  -- 2
+#   SELECT count(*) FROM movimiento_stock WHERE repuesto_id = 3;  -- 1
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 2;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes/2/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 67. reponer 2 bujias (C-12)
+# Esperado: 200 exactamente {"id": 3, "codigo": "TRN-BUJ-01", "descripcion": "Bujía", "precio": "4500.00", "stock": 4}
+# @no-cookie-jar
+POST {{base}}/repuestos/3/reponer
+Content-Type: application/json
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+{
+  "cantidad": 2
+}
+
+### 68. terminar la orden 2 con el stock repuesto (PDF C-12)
+# Esperado: 200 con "estado": "TERMINADA" y 3 lineas de historial
+# psql: el stock de la bujia queda en 0; consola de uvicorn: aviso de la orden #2 del vehículo ZTR003 despues de la respuesta:
+#   SELECT stock FROM repuesto WHERE id = 3;  -- 0
+#   SELECT cantidad, orden_id FROM movimiento_stock WHERE repuesto_id = 3 AND orden_id IS NOT NULL;  -- -4 | 2
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 2;  -- 3
+# @no-cookie-jar
+POST {{base}}/ordenes/2/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 69. movimientos de la bujia: la salida de la orden queda registrada (C-12)
+# Esperado: 200 con 3 elementos en orden: {cantidad: 2, motivo: "Stock inicial", orden_id: null},
+#   {cantidad: 2, motivo: "Reposición", orden_id: null} y {cantidad: -4, motivo: "Orden #2 terminada",
+#   orden_id: 2, usuario_id: <mecanico>}
+# @no-cookie-jar
+GET {{base}}/repuestos/3/movimientos
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# H. Rollback total (RN13): el segundo de tres repuestos por id no alcanza
+# =============================================================================
+
+### 70. terminar la orden 5 (repuestos 1, 2 y 4; el 2 tiene stock 4 y se piden 5)
+# Esperado: 409 {"detail": "Stock insuficiente para el repuesto TRN-FRE-01: hay 4 y se necesitan 5"}
+# psql: el descuento del repuesto 1 (con id menor) se revirtio; nada cambio y no hubo aviso:
+#   SELECT id, stock FROM repuesto WHERE id IN (1, 2, 4) ORDER BY id;  -- (1,9) (2,4) (4,16)
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id = 5;  -- 0
+#   SELECT estado FROM orden_trabajo WHERE id = 5;  -- EN_REPARACION
+#   SELECT count(*) FROM historial_estado_orden WHERE orden_id = 5;  -- 2
+# @no-cookie-jar
+POST {{base}}/ordenes/5/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 71. terminar la orden 5 con loginJefa (ADMIN): el mismo 409
+# Esperado: 409 {"detail": "Stock insuficiente para el repuesto TRN-FRE-01: hay 4 y se necesitan 5"}
+# @no-cookie-jar
+POST {{base}}/ordenes/5/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# I. Repuesto dado de baja despues del alta (S-11) y ADMIN no asignado
+# =============================================================================
+
+### 72. baja del repuesto 5 (TRN-BAJA-01), usado por la orden 6
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/repuestos/5
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 73. terminar la orden 6 con loginJefa (ADMIN, la orden es de mecanico2)
+# Esperado: 200 con "estado": "TERMINADA"; "mecanico_id" sigue siendo el de mecanico2 (terminar no lo cambia, S-05)
+# psql: el repuesto dado de baja se descuenta igual; el movimiento y la linea de historial son de la jefa:
+#   SELECT stock, borrado_en IS NOT NULL FROM repuesto WHERE id = 5;  -- 1 | t
+#   SELECT cantidad, usuario_id = (SELECT id FROM usuario WHERE email = 'jefa@transiciones.example.com') FROM movimiento_stock WHERE orden_id = 6;  -- -2 | t
+#   SELECT mecanico_id = (SELECT id FROM usuario WHERE email = 'mecanico2@transiciones.example.com') FROM orden_trabajo WHERE id = 6;  -- t
+#   SELECT usuario_id = (SELECT id FROM usuario WHERE email = 'jefa@transiciones.example.com') FROM historial_estado_orden WHERE orden_id = 6 ORDER BY id DESC LIMIT 1;  -- t
+# @no-cookie-jar
+POST {{base}}/ordenes/6/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# J. Rol revocado (S-04): el mecanico asignado necesita MECANICO vigente
+# =============================================================================
+
+### 74. jefa revoca el rol MECANICO de mecanico2 (C-09)
+# Esperado: 200 con revocada_en no nulo y vigente: false
+# psql: el rol quedo cerrado:
+#   SELECT revocada_en IS NOT NULL FROM asignacion_rol WHERE usuario_id = (SELECT id FROM usuario WHERE email = 'mecanico2@transiciones.example.com') AND rol = 'MECANICO';  -- t
+# @no-cookie-jar
+DELETE {{base}}/usuarios/{{registroMecanico2.response.body.$.id}}/roles/MECANICO
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 75. terminar la orden 7 con loginMecanico2 (asignada pero sin MECANICO vigente)
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/7/terminar
+Cookie: {{loginMecanico2.response.headers.Set-Cookie}}
+
+### 76. terminar la orden 7 con loginMecanico (MECANICO pero no asignado)
+# Esperado: 403 {"detail": "Sólo el mecánico asignado o un administrador puede terminar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/7/terminar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 77. terminar la orden 7 con loginJefa (ADMIN)
+# Esperado: 200 con "estado": "TERMINADA"
+# psql: el aceite baja una vez mas:
+#   SELECT stock FROM repuesto WHERE id = 4;  -- 15
+# @no-cookie-jar
+POST {{base}}/ordenes/7/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# K. Cancelar (specs 'Cancelar solo recepcion, administracion o el dueno', 'Solo se cancela...', PDF C-13)
+# =============================================================================
+
+### 78. cancelar la orden 3 (de la duena, PENDIENTE) con loginAjeno (PDF C-13: una orden ajena da 403)
+# Esperado: 403 {"detail": "Sólo la recepción, un administrador o el dueño del vehículo puede cancelar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 79. cancelar la orden 3 con loginMecanico (MECANICO que no es el dueño)
+# Esperado: 403 {"detail": "Sólo la recepción, un administrador o el dueño del vehículo puede cancelar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 80. cancelar la orden 3 con loginDuena (PDF C-13: el dueño cancela su orden pendiente)
+# Esperado: 200 con "estado": "CANCELADA", "mecanico_id": null y la ultima linea PENDIENTE -> CANCELADA con la duena
+# psql: la linea de historial es de la duena:
+#   SELECT estado, mecanico_id IS NULL FROM orden_trabajo WHERE id = 3;  -- CANCELADA | t
+#   SELECT desde_estado, hasta_estado, usuario_id = (SELECT id FROM usuario WHERE email = 'duena@transiciones.example.com') FROM historial_estado_orden WHERE orden_id = 3 ORDER BY id DESC LIMIT 1;  -- PENDIENTE | CANCELADA | t
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 81. cancelar la orden 3 otra vez con loginDuena
+# Esperado: 409 {"detail": "La orden 3 está CANCELADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 82. cancelar la orden 4 (de Jorge, ficha sin usuario) con loginDuena
+# Esperado: 403 {"detail": "Sólo la recepción, un administrador o el dueño del vehículo puede cancelar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/4/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 83. cancelar la orden 4 con loginRecepcion
+# Esperado: 200 con "estado": "CANCELADA"
+# @no-cookie-jar
+POST {{base}}/ordenes/4/cancelar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 84. cancelar la orden 2 (TERMINADA) con loginRecepcion (PDF C-13: una terminada, 409)
+# Esperado: 409 {"detail": "La orden 2 está TERMINADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/2/cancelar
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 85. cancelar la orden 5 (EN_REPARACION) con loginDuena, dueña de ese vehiculo
+# Esperado: 409 {"detail": "No se puede cancelar la orden 5: está EN_REPARACION y debe estar PENDIENTE"}
+# @no-cookie-jar
+POST {{base}}/ordenes/5/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+### 86. cancelar la orden 5 con loginAjeno: 403 antes que 409
+# Esperado: 403 {"detail": "Sólo la recepción, un administrador o el dueño del vehículo puede cancelar la orden"}
+# @no-cookie-jar
+POST {{base}}/ordenes/5/cancelar
+Cookie: {{loginAjeno.response.headers.Set-Cookie}}
+
+### 87. cancelar la orden 8 (PENDIENTE) con loginJefa (ADMIN)
+# Esperado: 200 con "estado": "CANCELADA"
+# @no-cookie-jar
+POST {{base}}/ordenes/8/cancelar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+### 88. iniciar la orden 8 (CANCELADA) con loginMecanico
+# Esperado: 409 {"detail": "La orden 8 está CANCELADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/8/iniciar
+Cookie: {{loginMecanico.response.headers.Set-Cookie}}
+
+### 89. terminar la orden 8 (CANCELADA) con loginJefa
+# Esperado: 409 {"detail": "La orden 8 está CANCELADA, un estado final: no admite más cambios"}
+# psql: cancelar no mueve stock y ningun rechazo lo hizo; consola de uvicorn: sin avisos de cancelaciones:
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id IN (3, 4, 5, 8);  -- 0
+#   SELECT id, stock FROM repuesto ORDER BY id;  -- (1,9) (2,4) (3,0) (4,15) (5,1)
+# @no-cookie-jar
+POST {{base}}/ordenes/8/terminar
+Cookie: {{loginJefa.response.headers.Set-Cookie}}
+
+# =============================================================================
+# L. Integracion con vehiculos (C-10, S-08)
+# =============================================================================
+
+### 90. baja del vehiculo de la duena con la orden 5 abierta (EN_REPARACION)
+# Esperado: 409 {"detail": "El vehículo tiene órdenes abiertas y no se puede dar de baja"}
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehDuena2.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 91. baja del otro vehiculo de la duena: sus ordenes 1, 3 y 7 estan en estado final
+# Esperado: 204 sin cuerpo
+# @no-cookie-jar
+DELETE {{base}}/vehiculos/{{vehDuena1.response.body.$.id}}
+Cookie: {{loginRecepcion.response.headers.Set-Cookie}}
+
+### 92. cancelar la orden 3 (vehiculo dado de baja) con loginDuena: sigue siendo la dueña (409, no 403)
+# Esperado: 409 {"detail": "La orden 3 está CANCELADA, un estado final: no admite más cambios"}
+# @no-cookie-jar
+POST {{base}}/ordenes/3/cancelar
+Cookie: {{loginDuena.response.headers.Set-Cookie}}
+
+# =============================================================================
+# M. Invariantes (psql, specs work-orders y stock-movements) -- no son peticiones HTTP
+# =============================================================================
+
+### 93. stock = suma de movimientos para todos los repuestos
+# psql:
+#   SELECT r.id, r.stock, COALESCE(SUM(m.cantidad), 0) FROM repuesto r LEFT JOIN movimiento_stock m ON m.repuesto_id = r.id GROUP BY r.id ORDER BY r.id;
+# Esperado: stock 9, 4, 0, 15, 1, cada uno igual a la suma de sus movimientos.
+
+### 94. cada orden TERMINADA tiene un movimiento por item, opuesto a la cantidad del item
+# psql:
+#   SELECT m.orden_id, m.repuesto_id, m.cantidad, i.cantidad, m.motivo FROM movimiento_stock m JOIN item_orden i ON i.orden_id = m.orden_id AND i.repuesto_id = m.repuesto_id ORDER BY 1, 2;
+#   SELECT count(*) FROM movimiento_stock WHERE orden_id IS NOT NULL;
+# Esperado: 5 filas (ordenes 1, 2, 6 y 7) con m.cantidad = -i.cantidad y motivo 'Orden #<id> terminada'; el conteo es 5.
+
+### 95. historial de cada orden
+# psql:
+#   SELECT orden_id, string_agg(COALESCE(desde_estado, 'null') || '>' || hasta_estado, ',' ORDER BY id) FROM historial_estado_orden GROUP BY orden_id ORDER BY 1;
+# Esperado: ordenes 1, 2, 6 y 7: null>PENDIENTE,PENDIENTE>EN_REPARACION,EN_REPARACION>TERMINADA; ordenes 3, 4 y 8:
+# null>PENDIENTE,PENDIENTE>CANCELADA; orden 5: null>PENDIENTE,PENDIENTE>EN_REPARACION (20 lineas en total).
+
+### 96. estado y mecanico de cada orden al final
+# psql:
+#   SELECT id, estado, mecanico_id, total FROM orden_trabajo ORDER BY id;
+# Esperado: 1 TERMINADA <mecanico>, 2 TERMINADA <mecanico>, 3 CANCELADA (NULL), 4 CANCELADA (NULL), 5 EN_REPARACION
+# <mecanico>, 6 TERMINADA <mecanico2>, 7 TERMINADA <mecanico2>, 8 CANCELADA (NULL); el total es el del alta.
+
+### 97. el historial esta encadenado y termina en el estado de la orden
+# psql:
+#   SELECT orden_id, id FROM (SELECT orden_id, id, desde_estado, LAG(hasta_estado) OVER (PARTITION BY orden_id ORDER BY id) AS previo FROM historial_estado_orden) h WHERE desde_estado IS DISTINCT FROM previo;
+#   SELECT count(*) FROM orden_trabajo o WHERE o.estado IS DISTINCT FROM (SELECT hasta_estado FROM historial_estado_orden h WHERE h.orden_id = o.id ORDER BY h.id DESC LIMIT 1);
+# Esperado: 0 filas en el primero; 0 en el segundo (el ultimo hasta_estado de cada orden es su estado).
+
+# =============================================================================
+# Verificados por script (no expresables por HTTP; script temporal no versionado
+# `verificar_c14.py`, design D9 bloques a-i)
+# =============================================================================
+# - (a) Dos transiciones sobre la misma orden: dos terminar detenidos por un FOR UPDATE de otra conexion -> uno 200 y
+#   otro 409, stock descontado una vez, una linea de historial nueva y un solo aviso; iniciar + cancelar simultaneos
+#   sobre una PENDIENTE -> exactamente un 200; terminar + cancelar sobre una EN_REPARACION -> 200 y 409.
+# - (b) Terminar detenido despues del descuento (historial.add espera un evento): reponer, PATCH de precio, DELETE de otro
+#   repuesto de la orden y un alta con esos repuestos esperan; al liberar, la orden confirma y despues responden 200/200/204/201.
+# - (c) Repuesto bloqueado primero por otra conexion: terminar espera con la orden bloqueada y un cancelar de la misma
+#   orden espera en el paso 1; COMMIT -> 200 y 409; variante con baja del repuesto confirmada antes -> terminar 200.
+# - (d) Sin interbloqueos: 20 vueltas de dos terminar de ordenes distintas con los mismos dos repuestos (items en orden
+#   inverso), un alta, un reponer y un PATCH de precio a la vez -> nunca 40P01 ni 500; stock = suma de movimientos.
+# - (e) Atomicidad: el segundo de tres repuestos no alcanza -> 409 y foto antes/despues identica; OrdenesUoW cuyo
+#   historial.add lanza RuntimeError despues del descuento -> el error llega sin reemplazo y no queda ningun cambio.
+# - (f) Aviso: una sola llamada por terminar con 200, despues del cuerpo de la respuesta y viendo la orden TERMINADA y sus
+#   movimientos confirmados; ninguna con 409 (stock y estado), 403, 404, ni en iniciar/cancelar; una linea INFO de
+#   uvicorn.error.avisos >= 0,5 s despues de empezar la tarea.
+# - (g) Consultas por operacion: iniciar 7, cancelar 8 (personal) / 9 (dueño), terminar 11 (1 item) / 15 (3 items) sentencias
+#   en el bloque; la primera es el FOR UPDATE de orden_trabajo; ninguna FOR sobre vehiculo; UPDATE repuesto en orden
+#   ascendente de id; ids como parametros.
+# - (h) /openapi.json: las tres rutas sin requestBody, orden_id entero 1..2147483647, respuesta 200 con los campos de
+#   OrdenDetalleSalida, sin password_hash, borrado_en ni stock.
+# - (i) Invariantes sobre todas las filas: stock = suma de movimientos; cada orden TERMINADA tiene un movimiento por item
+#   con cantidad = -item.cantidad y ninguna otra tiene; historial encadenado y terminado en el estado de la orden;
+#   mecanico_id nulo en toda orden que nunca se inicio.
+#
+# Escenario -> caso: iniciar 50-56 y 37-44; solo se inicia pendiente 51, 52, 65, 88; sin datos del cliente 53; orden
+# inexistente e id invalido 41-46; terminar con permiso 57-60, 73, 75-77; solo se termina en reparacion 61, 63, 89;
+# descuento de stock 62, 68, 73, 77; falta de stock 66, 70, 71 y (e); PDF C-11/C-12 66-69; aviso 62, 68 y (f);
+# cancelar 78-87, 92; catalogo 48-49; historial 50, 62, 80 y 95-97; respuesta 50, 62; concurrencia (a)-(d).

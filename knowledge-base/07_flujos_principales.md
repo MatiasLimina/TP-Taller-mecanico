@@ -36,12 +36,12 @@ Cliente → Router → Service → [sesión propia: intento_acceso]
 
 1. Servicio abre UoW; valida permiso (403) y estado EN_REPARACION (409).
 2. Para cada ítem: descuenta stock por el **punto único de escritura**; crea `movimiento_stock` (cantidad negativa, `orden_id`).
-3. Si algún repuesto no alcanza (CHECK `stock >= 0` / validación) → 409; rollback total.
+3. Si algún repuesto no alcanza, el 409 lo decide el `UPDATE` condicional del punto único de escritura (C-11), no un CHECK `stock >= 0` aparte → rollback total. Orden de bloqueos: orden `FOR UPDATE` primero, luego repuestos en orden ascendente de id.
 4. Cambia estado a TERMINADA + línea en `historial_estado_orden`.
 5. Commit al salir del bloque; recién entonces se agenda `BackgroundTasks` (aviso simulado `sleep(0.5)` + log), que corre tras enviar la respuesta.
 
 ## Flujo 6: Cancelar orden (RN12) — C-13
-1. Identificar al actor y su relación con la orden (personal con rol vigente o dueño del vehículo) → 403 si no.
+1. Identificar al actor y su relación con la orden (personal con rol vigente o dueño del vehículo: el usuario del cliente al que pertenece el vehículo, aun si el vehículo está dado de baja, C-14 S-08) → 403 si no. Orden inexistente → 404 antes que 403 para una orden ajena (S-07).
 2. Recién después, estado PENDIENTE → CANCELADA; otro estado → 409.
 3. Historial de estado.
 
